@@ -1,0 +1,10 @@
+## Interface: 110200
+## Title: HandMeDowns
+## Notes: TODO
+## Author: Kiaro-Frostwolf
+## Version: @project-version@
+## X-Website: https://github.com/sgade/HandMeDowns
+## X-Curse-Project-ID: 918022
+
+embeds.xml
+HandMeDowns-1.0.xml
