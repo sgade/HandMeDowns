@@ -20,4 +20,18 @@
 
 ----------------------------------------------------------------------------]]--
 
-print("Hello World from HandMeDowns!")
+HandMeDowns = LibStub("AceAddon-3.0"):NewAddon("HandMeDowns", "AceConsole-3.0")
+
+--print("Hello World from HandMeDowns!")
+
+function HandMeDowns:OnInitialize()
+    HandMeDowns.Print(self, "Initialized.")
+end
+
+function HandMeDowns:OnEnable()
+    HandMeDowns.Print(self, "Enabled.")
+end
+
+function HandMeDowns:OnDisable()
+    HandMeDowns.Print(self, "Disabled.")
+end

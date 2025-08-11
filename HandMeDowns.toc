@@ -7,4 +7,5 @@
 ## X-Curse-Project-ID: 918022
 
 embeds.xml
-HandMeDowns-1.0.xml
+
+HandMeDowns.lua
