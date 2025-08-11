@@ -63,11 +63,13 @@ end
 -- *** Lifecyle
 
 function HandMeDowns:OnInitialize()
-    HandMeDowns:Print("Initialized.")
+    -- stub
 end
 
 function HandMeDowns:OnEnable()
     HandMeDowns:HookItemTooltips()
+
+    HandMeDowns:Print("Ready.")
 end
 
 function HandMeDowns:HookItemTooltips()
@@ -83,8 +85,6 @@ function HandMeDowns:HookItemTooltips()
             self:OnTooltipSetItem(...)
         end)
     end
-
-    HandMeDowns:Print("Tooltips hooked.")
 end
 
 function HandMeDowns:OnDisable()
@@ -111,7 +111,7 @@ end
 
 ---Finds the best character to wear a given item
 ---@param link string|number
----@return [string, string?, number, number]? upgradeInfo
+---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindBestCharacterForItem(link)
     local bind = GetItemBind(link)
     if not bind or bind == Enum.ItemBind.None then
@@ -124,41 +124,61 @@ function HandMeDowns:FindBestCharacterForItem(link)
         return
     end
 
-    if HandMeDowns:IsUpgradeForCharacter(link, "player") then
-        local playerName, server = UnitName("player")
-        local level = GetActualItemLevel(link)
+    -- DataStore.ThisAccount: usually "Default"
+    -- DataStore:GetCharacter(): usually "Default.Server.Name"
 
-        return {
-            playerName,
-            server,
-            0,
-            level
-        }
+    -- assuming "this account" is the warband
+    return HandMeDowns:FindUpgradeForCharacterOnAccount(DataStore.ThisAccount, link)
+end
+
+---@return [string, number, number]? upgradeInfo
+function HandMeDowns:FindUpgradeForCharacterOnAccount(account, itemLink)
+    for realm in pairs(DataStore:GetRealms(account)) do
+        local result = HandMeDowns:FindUpgradeForCharacterOnRealm(realm, account, itemLink)
+        if result then
+            return result
+        end
+    end
+
+    return nil
+end
+
+---@return [string, number, number]? upgradeInfo
+function HandMeDowns:FindUpgradeForCharacterOnRealm(realm, account, itemLink)
+    for characterName, character in pairs(DataStore:GetCharacters(realm, account)) do
+        local isUpgrade = HandMeDowns:IsUpgradeForCharacter(itemLink, character)
+
+        if isUpgrade then
+            return characterName
+        end
     end
 end
 
----@return boolean
-function HandMeDowns:IsUpgradeForCharacter(itemLink, character)
-    if not (character == "player") then
-        -- other characters are not currently supported
-        HandMeDowns:Print("Other characters are currently not supported.")
-        return false
-    end
-
+---@return [string, number, number]? upgradeInfo
+function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
     local inventoryType = C_Item.GetItemInventoryTypeByID(itemLink)
     if not inventoryType then
-        return false
+        return
     end
 
-    local level, _ = GetActualItemLevel(itemLink)
-
-    local equippedItemLink = GetInventoryItemLink(character, inventoryType)
-    local equippedLevel
+    local equippedItemLink = DataStore.GetInventoryItem(character, inventoryType - 1)
     if not equippedItemLink then
-        equippedLevel = 0
-    else
-        equippedLevel = GetActualItemLevel(equippedItemLink)
+        return
     end
 
-    return equippedLevel < level
+    local itemLevel = GetActualItemLevel(itemLink)
+    local equippedItemLevel = GetActualItemLevel(equippedItemLink)
+    if itemLevel < equippedItemLevel then
+        return
+    end
+
+    return {
+        character,
+        equippedItemLevel,
+        itemLevel
+    }
+end
+
+function HandMeDowns:IsItemUpgrade(existingItem, compareItem)
+
 end
