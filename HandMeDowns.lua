@@ -32,16 +32,21 @@ local function arrayContains(array, element)
 end
 
 ---@param link number|string
----@return number level Item level
----@return Enum.InventoryType location
 ---@return Enum.ItemBind bindType
-local function ShortItemInfo(link)
-    local _, _, _, _, _, _, _, _, location, _, _, _, _, bindType = C_Item.GetItemInfo(link)
+local function GetItemBind(link)
+    local _, _, _, _, _, _, _, _, _, _, _, _, _, bindType = C_Item.GetItemInfo(link)
+    return bindType
+end
+
+---@param link number|string
+---@return number
+local function GetActualItemLevel(link)
     local level, _, _ = C_Item.GetDetailedItemLevelInfo(link)
-    return level, location, bindType
+    return level
 end
 
 ---@param bindType Enum.ItemBind
+---@return boolean
 local function CanItemBeSentToTwink(bindType)
     ---@type Enum.ItemBind[]
     local relevantForTwinks = {
@@ -58,7 +63,7 @@ end
 -- *** Lifecyle
 
 function HandMeDowns:OnInitialize()
-    HandMeDowns:Print(self, "Initialized.")
+    HandMeDowns:Print("Initialized.")
 end
 
 function HandMeDowns:OnEnable()
@@ -79,11 +84,11 @@ function HandMeDowns:HookItemTooltips()
         end)
     end
 
-    HandMeDowns:Print(self, "Tooltips hooked.")
+    HandMeDowns:Print("Tooltips hooked.")
 end
 
 function HandMeDowns:OnDisable()
-    HandMeDowns:Print(self, "Disabled.")
+    HandMeDowns:Print("Disabled.")
 end
 
 -- *** Setting the tooltip
@@ -108,8 +113,8 @@ end
 ---@param link string|number
 ---@return [string, string?, number, number]? upgradeInfo
 function HandMeDowns:FindBestCharacterForItem(link)
-    local level, location, bind = ShortItemInfo(link)
-    if not level or not location or not bind or bind == Enum.ItemBind.None then
+    local bind = GetItemBind(link)
+    if not bind or bind == Enum.ItemBind.None then
         -- item cannot be equipped
         return
     end
@@ -119,29 +124,41 @@ function HandMeDowns:FindBestCharacterForItem(link)
         return
     end
 
-    local inventoryType = C_Item.GetItemInventoryTypeByID(link)
-    if not inventoryType then
-        return
+    if HandMeDowns:IsUpgradeForCharacter(link, "player") then
+        local playerName, server = UnitName("player")
+        local level = GetActualItemLevel(link)
+
+        return {
+            playerName,
+            server,
+            0,
+            level
+        }
+    end
+end
+
+---@return boolean
+function HandMeDowns:IsUpgradeForCharacter(itemLink, character)
+    if not (character == "player") then
+        -- other characters are not currently supported
+        HandMeDowns:Print("Other characters are currently not supported.")
+        return false
     end
 
-    local equippedItemLink = GetInventoryItemLink("player", inventoryType)
+    local inventoryType = C_Item.GetItemInventoryTypeByID(itemLink)
+    if not inventoryType then
+        return false
+    end
+
+    local level, _ = GetActualItemLevel(itemLink)
+
+    local equippedItemLink = GetInventoryItemLink(character, inventoryType)
     local equippedLevel
     if not equippedItemLink then
         equippedLevel = 0
     else
-        equippedLevel, _, _ = ShortItemInfo(equippedItemLink)
+        equippedLevel = GetActualItemLevel(equippedItemLink)
     end
 
-    if equippedLevel >= level then
-        return
-    end
-
-    local playerName, server = UnitName("player")
-    return {
-        playerName,
-        server,
-        equippedLevel,
-        level
-    }
-    -- return playerName
+    return equippedLevel < level
 end
