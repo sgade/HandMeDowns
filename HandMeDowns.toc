@@ -1,6 +1,6 @@
 ## Interface: 110200
 ## Title: HandMeDowns
-## Notes: TODO
+## Notes: Recommends twinks for warbound gear
 ## Author: Kiaro-Frostwolf
 ## Version: @project-version@
 ## X-Website: https://github.com/sgade/HandMeDowns
