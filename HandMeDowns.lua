@@ -96,8 +96,11 @@ end
 ---Hooks the tooltip
 ---@param frame GameTooltip
 function HandMeDowns:OnTooltipSetItem(frame, ...)
-    ---@type string, string
+    ---@type string, string|number
     local _, itemLink = frame:GetItem()
+    if not itemLink then
+        return
+    end
 
     local target = HandMeDowns:FindBestCharacterForItem(itemLink)
     if not target then
@@ -146,7 +149,7 @@ end
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharacterOnRealm(realm, account, itemLink)
     for characterName, character in pairs(DataStore:GetCharacters(realm, account)) do
-        local isUpgrade = HandMeDowns:IsUpgradeForCharacter(itemLink, character)
+        local isUpgrade = HandMeDowns:FindUpgradeForCharacter(itemLink, character)
 
         if isUpgrade then
             return characterName
@@ -156,21 +159,13 @@ end
 
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
-    local inventoryType = C_Item.GetItemInventoryTypeByID(itemLink)
-    if not inventoryType then
+    local bestCompareItem = HandMeDowns:GetBestCompareItem(itemLink, character)
+    if not bestCompareItem then
         return
     end
 
-    local equippedItemLink = DataStore.GetInventoryItem(character, inventoryType - 1)
-    if not equippedItemLink then
-        return
-    end
-
+    local equippedItemLevel = GetActualItemLevel(bestCompareItem)
     local itemLevel = GetActualItemLevel(itemLink)
-    local equippedItemLevel = GetActualItemLevel(equippedItemLink)
-    if itemLevel < equippedItemLevel then
-        return
-    end
 
     return {
         character,
@@ -179,6 +174,48 @@ function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
     }
 end
 
-function HandMeDowns:IsItemUpgrade(existingItem, compareItem)
+function HandMeDowns:GetBestCompareItem(itemLink, character)
+    -- inventory
+    local getInventoryItem = function()
+        if not DataStore.GetInventoryItem then
+            HandMeDowns:Print("warn: DataStore.GetInventoryItem not available.")
+            return
+        end
 
+        local inventoryType = C_Item.GetItemInventoryTypeByID(itemLink)
+        if not inventoryType then
+            return
+        end
+
+        return DataStore.GetInventoryItem(character, inventoryType - 1)
+    end
+
+    -- bags
+    local getBagItem = function()
+        if not DataStore.GetContainers then
+            HandMeDowns:Print("warn: DataStore.GetContainers not available.")
+            return
+        end
+
+        local containers = DataStore.GetContainers(character)
+        -- TODO: search in containers
+        return nil
+    end
+
+    local bestItem
+    local items = {getInventoryItem(), getBagItem()}
+    for item in pairs(items) do
+        if not bestItem then
+            bestItem = item
+        elseif item then
+            local bestItemLevel = GetActualItemLevel(bestItem)
+            local itemLevel = GetActualItemLevel(item)
+
+            if bestItemLevel < itemLevel then
+                bestItem = item
+            end
+        end
+    end
+
+    return bestItem
 end
