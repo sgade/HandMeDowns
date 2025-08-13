@@ -64,6 +64,65 @@ local function GetItemEquipLocation(link)
     return itemEquipLoc
 end
 
+local EquipLocToSlotID = {
+    INVTYPE_HEAD       = INVSLOT_HEAD,       -- 1
+    INVTYPE_NECK       = INVSLOT_NECK,       -- 2
+    INVTYPE_SHOULDER   = INVSLOT_SHOULDER,   -- 3
+    INVTYPE_BODY       = INVSLOT_BODY,       -- 4 (shirt)
+    INVTYPE_CHEST      = INVSLOT_CHEST,      -- 5
+    INVTYPE_ROBE       = INVSLOT_CHEST,      -- 5
+    INVTYPE_WAIST      = INVSLOT_WAIST,      -- 6
+    INVTYPE_LEGS       = INVSLOT_LEGS,       -- 7
+    INVTYPE_FEET       = INVSLOT_FEET,       -- 8
+    INVTYPE_WRIST      = INVSLOT_WRIST,      -- 9
+    INVTYPE_HAND       = INVSLOT_HAND,       -- 10
+    INVTYPE_FINGER     = INVSLOT_FINGER1,    -- needs special handling
+    INVTYPE_TRINKET    = INVSLOT_TRINKET1,   -- needs special handling
+    INVTYPE_CLOAK      = INVSLOT_BACK,       -- 15
+    INVTYPE_WEAPON     = INVSLOT_MAINHAND,   -- needs dual-wield handling
+    INVTYPE_2HWEAPON   = INVSLOT_MAINHAND,
+    INVTYPE_WEAPONMAINHAND = INVSLOT_MAINHAND,
+    INVTYPE_WEAPONOFFHAND  = INVSLOT_OFFHAND,
+    INVTYPE_SHIELD     = INVSLOT_OFFHAND,
+    INVTYPE_HOLDABLE   = INVSLOT_OFFHAND,
+    INVTYPE_RANGED     = INVSLOT_RANGED,
+    INVTYPE_RANGEDRIGHT = INVSLOT_RANGED,
+    INVTYPE_THROWN     = INVSLOT_RANGED,
+    INVTYPE_RELIC      = INVSLOT_RANGED,
+    INVTYPE_TABARD     = INVSLOT_TABARD,     -- 19
+}
+
+---@param character string
+---@param equipLocation string
+---@return ItemInfo[]
+local function GetEquippedItemsForEquipLocation(character, equipLocation)
+    local slotId = EquipLocToSlotID[equipLocation]
+    if not slotId then
+        return {}
+    end
+
+    local getItem = function(slotId)
+        if character == DataStore.ThisCharKey then
+            return GetInventoryItemID("player", slotId)
+        end
+        return DataStore.GetInventoryItem(character, slotId)
+    end
+
+    if equipLocation == "INVTYPE_FINGER" then
+        return {
+            getItem(INVSLOT_FINGER1),
+            getItem(INVSLOT_FINGER2)
+        }
+    elseif equipLocation == "INVTYPE_TRINKET" then
+        return {
+            getItem(INVSLOT_TRINKET1),
+            getItem(INVSLOT_TRINKET2)
+        }
+    else
+        return { getItem(slotId) }
+    end
+end
+
 ---@param bindType Enum.ItemBind
 ---@return boolean
 local function CanItemBeSentToTwink(bindType)
@@ -77,6 +136,36 @@ local function CanItemBeSentToTwink(bindType)
         Enum.ItemBind.ToBnetAccountUntilEquipped
     }
     return arrayContains(relevantForTwinks, bindType)
+end
+
+-- Reimplementation from DataStore_Containers
+local function IterateBagItems(character, callback)
+    if not character.Containers then return end
+
+    for containerId, container in pairs(character.Containers) do
+        for slotId = 1, DataStore:GetContainerSize(character, containerId) do
+            local itemId = DataStore:GetSlotInfo(container, slotId)
+
+            -- Callback only if there is an item in that slot
+            if itemId then
+                callback(containerId, container, slotId, itemId)
+            end
+        end
+    end
+end
+
+---@param key string
+---@return string?, string?
+local function CharacterServerAndNameFromKey(key)
+    ---@type string?
+    local server = nil
+    ---@type string?
+    local name = nil
+    for part in string.gmatch(key, "%a+") do
+        server = name
+        name = part
+    end
+    return server, name
 end
 
 -- *** Lifecyle
@@ -94,14 +183,14 @@ end
 function HandMeDowns:HookItemTooltips()
     if TooltipDataProcessor then
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(frame, ...)
-            if frame == GameTooltip and self:IsEnabled() then
-                return self:OnTooltipSetItem(frame, ...)
+            if frame == GameTooltip and HandMeDowns:IsEnabled() then
+                return HandMeDowns:OnTooltipSetItem(frame, ...)
             end
         end)
     else
         -- legacy
         GameTooltip:HookScript('OnTooltipSetItem', function (...)
-            self:OnTooltipSetItem(...)
+            HandMeDowns:OnTooltipSetItem(...)
         end)
     end
 end
@@ -122,12 +211,21 @@ function HandMeDowns:OnTooltipSetItem(frame, ...)
         return
     end
 
-    local target = HandMeDowns:FindBestCharacterForItem(itemLink)
-    if not target then
+    local upgradeInfo = HandMeDowns:FindBestCharacterForItem(itemLink)
+    if not upgradeInfo then
         return
     end
 
-    frame:AddLine("HandMeDowns! Send this to " .. target[1] .. " (Upgrade from " .. target[3] .. " to " .. target[4] .. ")", 0, 0.75, 0.33, false)
+    local distributionInfo = (function()
+        if upgradeInfo[1] == DataStore.ThisCharKey then
+            return "Use here!"
+        else
+            local characterServer, characterName = CharacterServerAndNameFromKey(upgradeInfo[1])
+            return "HandMeDowns! Send this to " .. characterName .. "@" .. characterServer .. "."
+        end
+    end)()
+
+    frame:AddLine(distributionInfo .. " Upgrade from " .. upgradeInfo[2] .. " to " .. upgradeInfo[3] .. ".", 0, 0.75, 0.33, false)
 end
 
 -- *** Finding the best character for an item
@@ -212,37 +310,32 @@ end
 ---
 ---@param itemLink string|number The item to compare against.
 ---@param character string The character to search within.
----@return (string|number)?
+---@return ItemInfo?
 function HandMeDowns:GetBestCompareItem(itemLink, character)
-    local equipLocation = GetItemEquipLocation(itemLink)
+    local equipmentLocation = GetItemEquipLocation(itemLink)
 
     -- inventory
-    ---@return (string|number)[]
+    ---@return ItemInfo[]
     local getInventoryItems = function()
         if not DataStore.GetInventoryItem then
             HandMeDowns:Print("warn: DataStore.GetInventoryItem not available.")
             return {}
         end
 
-        local inventoryType = C_Item.GetItemInventoryTypeByID(itemLink)
-        if not inventoryType then
-            return {}
-        end
-
-        return {DataStore.GetInventoryItem(character, inventoryType - 1)}
+        return GetEquippedItemsForEquipLocation(character, equipmentLocation)
     end
 
     -- bags
-    ---@return (string|number)[]
+    ---@return ItemInfo[]
     local getBagItems = function()
-        if not DataStore.IterateBags then
-            HandMeDowns:Print("warn: DataStore.GetContainers not available.")
-            return {}
-        end
+        -- if not DataStore.IterateBags then
+        --     HandMeDowns:Print("warn: DataStore.IterateBags not available.")
+        --     return {}
+        -- end
 
-        ---@type (string|number)[]
+        ---@type ItemInfo[]
         local items = {}
-        DataStore:IterateBags(character, function(containerId, container, slotId, itemId)
+        IterateBagItems(character, function(containerId, container, slotId, itemId)
             if GetItemEquipLocation(itemId) then
                 table.insert(items, itemId)
             end
@@ -252,17 +345,17 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
     end
 
     -- mails
-    ---@return (string|number)[]
+    ---@return ItemInfo[]
     local getMailItems = function()
         if not DataStore.IterateMails then
             HandMeDowns:Print("warn: DataStore.IterateMails not available.")
             return {}
         end
 
-        ---@type (string|number)[]
+        ---@type ItemInfo[]
         local items = {}
         DataStore:IterateMails(character, function(icon, count, itemLink, money, text, returned)
-            if GetItemEquipLocation(itemLink) == equipLocation then
+            if GetItemEquipLocation(itemLink) == equipmentLocation then
                 table.insert(items, itemLink)
             end
         end)
@@ -270,7 +363,7 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
         return items
     end
 
-    ---@type (string|number)?
+    ---@type ItemInfo?
     local bestItem
     local items = tableConcat(tableConcat(getInventoryItems(), getBagItems()), getMailItems())
     for _, item in ipairs(items) do
