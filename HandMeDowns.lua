@@ -97,6 +97,7 @@ end
 ---@param frame GameTooltip
 function HandMeDowns:OnTooltipSetItem(frame, ...)
     ---@type string, string|number
+    ---@diagnostic disable-next-line: assign-type-mismatch
     local _, itemLink = frame:GetItem()
     if not itemLink then
         return
@@ -136,10 +137,11 @@ end
 
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharacterOnAccount(account, itemLink)
+    -- TODO: instead of going through all realms and characters, go through a priorized list
     for realm in pairs(DataStore:GetRealms(account)) do
-        local result = HandMeDowns:FindUpgradeForCharacterOnRealm(realm, account, itemLink)
-        if result then
-            return result
+        local upgradeInfo = HandMeDowns:FindUpgradeForCharacterOnRealm(realm, account, itemLink)
+        if upgradeInfo then
+            return upgradeInfo
         end
     end
 
@@ -149,33 +151,52 @@ end
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharacterOnRealm(realm, account, itemLink)
     for characterName, character in pairs(DataStore:GetCharacters(realm, account)) do
-        local isUpgrade = HandMeDowns:FindUpgradeForCharacter(itemLink, character)
+        local upgradeInfo = HandMeDowns:FindUpgradeForCharacter(itemLink, character)
 
-        if isUpgrade then
-            return characterName
+        if upgradeInfo then
+            return upgradeInfo
         end
     end
+
+    return nil
 end
 
+---Retrieves upgrade information about the given item for the character.
+---If the item is an upgrade, upgrade info is returned, `nil` otherwise.
+---
+---@param itemLink string|number
+---@param character string
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
     local bestCompareItem = HandMeDowns:GetBestCompareItem(itemLink, character)
     if not bestCompareItem then
+        -- no item to compare against
         return
     end
 
-    local equippedItemLevel = GetActualItemLevel(bestCompareItem)
+    local availableItemLevel = GetActualItemLevel(bestCompareItem)
     local itemLevel = GetActualItemLevel(itemLink)
+
+    if availableItemLevel > itemLevel then
+        -- available item is better than the one we compare for
+        return
+    end
 
     return {
         character,
-        equippedItemLevel,
+        availableItemLevel,
         itemLevel
     }
 end
 
+---Finds the best item as comparison for the given item.
+---
+---@param itemLink string|number The item to compare against.
+---@param character string The character to search within.
+---@return (string|number)?
 function HandMeDowns:GetBestCompareItem(itemLink, character)
     -- inventory
+    ---@return (string|number)?
     local getInventoryItem = function()
         if not DataStore.GetInventoryItem then
             HandMeDowns:Print("warn: DataStore.GetInventoryItem not available.")
@@ -191,6 +212,7 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
     end
 
     -- bags
+    ---@return (string|number)?
     local getBagItem = function()
         if not DataStore.GetContainers then
             HandMeDowns:Print("warn: DataStore.GetContainers not available.")
@@ -202,6 +224,7 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
         return nil
     end
 
+    ---@type (string|number)?
     local bestItem
     local items = {getInventoryItem(), getBagItem()}
     for item in pairs(items) do
@@ -211,7 +234,7 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
             local bestItemLevel = GetActualItemLevel(bestItem)
             local itemLevel = GetActualItemLevel(item)
 
-            if bestItemLevel < itemLevel then
+            if bestItemLevel > itemLevel then
                 bestItem = item
             end
         end
