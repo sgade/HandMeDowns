@@ -3,7 +3,7 @@
 ## Notes: Recommends twinks for warbound gear
 ## Author: Kiaro-Frostwolf
 ## Version: @project-version@
-## Dependencies: DataStore, DataStore_Inventory, DataStore_Containers
+## Dependencies: DataStore, DataStore_Inventory, DataStore_Containers, DataStore_Mails
 ## X-Website: https://github.com/sgade/HandMeDowns
 ## X-Curse-Project-ID: 918022
 

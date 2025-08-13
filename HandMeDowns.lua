@@ -31,6 +31,20 @@ local function arrayContains(array, element)
     return false
 end
 
+---Merges table2 into table1.
+---
+---Source: https://www.tutorialspoint.com/lua/lua_merging_arrays.htm
+---@generic T
+---@param table1 T[]
+---@param table2 T[]
+---@return T[]
+local function tableConcat(table1, table2)
+    for i = 1, #table2 do
+        table1[#table1+1] = table2[i]
+    end
+    return table1
+end
+
 ---@param link number|string
 ---@return Enum.ItemBind bindType
 local function GetItemBind(link)
@@ -43,6 +57,11 @@ end
 local function GetActualItemLevel(link)
     local level, _, _ = C_Item.GetDetailedItemLevelInfo(link)
     return level
+end
+
+local function GetItemEquipLocation(link)
+    local _, _, _, _, _, _, _, _, itemEquipLoc = C_Item.GetItemInfo(link)
+    return itemEquipLoc
 end
 
 ---@param bindType Enum.ItemBind
@@ -195,39 +214,66 @@ end
 ---@param character string The character to search within.
 ---@return (string|number)?
 function HandMeDowns:GetBestCompareItem(itemLink, character)
+    local equipLocation = GetItemEquipLocation(itemLink)
+
     -- inventory
-    ---@return (string|number)?
-    local getInventoryItem = function()
+    ---@return (string|number)[]
+    local getInventoryItems = function()
         if not DataStore.GetInventoryItem then
             HandMeDowns:Print("warn: DataStore.GetInventoryItem not available.")
-            return
+            return {}
         end
 
         local inventoryType = C_Item.GetItemInventoryTypeByID(itemLink)
         if not inventoryType then
-            return
+            return {}
         end
 
-        return DataStore.GetInventoryItem(character, inventoryType - 1)
+        return {DataStore.GetInventoryItem(character, inventoryType - 1)}
     end
 
     -- bags
-    ---@return (string|number)?
-    local getBagItem = function()
-        if not DataStore.GetContainers then
+    ---@return (string|number)[]
+    local getBagItems = function()
+        if not DataStore.IterateBags then
             HandMeDowns:Print("warn: DataStore.GetContainers not available.")
-            return
+            return {}
         end
 
-        local containers = DataStore.GetContainers(character)
-        -- TODO: search in containers
-        return nil
+        ---@type (string|number)[]
+        local items = {}
+        DataStore:IterateBags(character, function(containerId, container, slotId, itemId)
+            if GetItemEquipLocation(itemId) then
+                table.insert(items, itemId)
+            end
+        end)
+
+        return items
+    end
+
+    -- mails
+    ---@return (string|number)[]
+    local getMailItems = function()
+        if not DataStore.IterateMails then
+            HandMeDowns:Print("warn: DataStore.IterateMails not available.")
+            return {}
+        end
+
+        ---@type (string|number)[]
+        local items = {}
+        DataStore:IterateMails(character, function(icon, count, itemLink, money, text, returned)
+            if GetItemEquipLocation(itemLink) == equipLocation then
+                table.insert(items, itemLink)
+            end
+        end)
+
+        return items
     end
 
     ---@type (string|number)?
     local bestItem
-    local items = {getInventoryItem(), getBagItem()}
-    for item in pairs(items) do
+    local items = tableConcat(tableConcat(getInventoryItems(), getBagItems()), getMailItems())
+    for _, item in ipairs(items) do
         if not bestItem then
             bestItem = item
         elseif item then
