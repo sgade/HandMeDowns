@@ -45,18 +45,55 @@ local function tableConcat(table1, table2)
     return table1
 end
 
----@param link number|string
+---@param link ItemInfo
 ---@return Enum.ItemBind bindType
 local function GetItemBind(link)
     local _, _, _, _, _, _, _, _, _, _, _, _, _, bindType = C_Item.GetItemInfo(link)
     return bindType
 end
 
----@param link number|string
+---@param link ItemInfo
+local function GetItemTypeAndSubType(link)
+    local _, _, _, _, _, itemType, itemSubType = C_Item.GetItemInfo(link)
+    return itemType, itemSubType
+end
+
+---@param link ItemInfo
 ---@return number
 local function GetActualItemLevel(link)
     local level, _, _ = C_Item.GetDetailedItemLevelInfo(link)
     return level
+end
+
+---@param character string
+---@param itemLink ItemInfo
+---@return boolean
+local function CanCharacterEquipItem(character, itemLink)
+    local itemType, itemSubType = GetItemTypeAndSubType(itemLink)
+    if itemType ~= "Armor" then
+        return false
+    end
+
+    local classesThatWearTheItemSubType = {}
+    if itemSubType == "Cloth" then
+        classesThatWearTheItemSubType = {"Priest", "Mage", "Warlock"}
+    elseif itemSubType == "Leather" then
+        classesThatWearTheItemSubType = {"Rogue", "Monk", "Druid", "Demonhunter"}
+    elseif itemSubType == "Mail" then
+        classesThatWearTheItemSubType = {"Hunter", "Shaman", "Evoker"}
+    elseif itemSubType == "Plate" then
+        classesThatWearTheItemSubType = {"Warrior", "Paladin", "Deathknight"}
+    elseif itemSubType == "Miscellaneous" then
+        -- trinkets, rings, etc
+        classesThatWearTheItemSubType = {"Warrior", "Paladin", "Deathknight", "Hunter", "Shaman", "Evoker", "Rogue", "Monk", "Druid", "Demonhunter", "Priest", "Mage", "Warlock"}
+    else
+        HandMeDowns:Print("warn: unknown armor type '" .. itemSubType .. "'")
+    end
+
+    -- TODO: this could be a localized class name, then it would only work on english clients
+    local class = DataStore:GetCharacterClass(character)
+
+    return arrayContains(classesThatWearTheItemSubType, class)
 end
 
 local function GetItemEquipLocation(link)
@@ -199,7 +236,7 @@ end
 ---Hooks the tooltip
 ---@param frame GameTooltip
 function HandMeDowns:OnTooltipSetItem(frame, ...)
-    ---@type string, string|number
+    ---@type string, ItemInfo
     ---@diagnostic disable-next-line: assign-type-mismatch
     local _, itemLink = frame:GetItem()
     if not itemLink then
@@ -215,9 +252,7 @@ function HandMeDowns:OnTooltipSetItem(frame, ...)
         if upgradeInfo[1] == DataStore.ThisCharKey then
             return "Use here!"
         else
-            -- local characterServer, characterName = CharacterServerAndNameFromKey(upgradeInfo[1])
-            local characterServer = "DEFAULT"
-            local characterName = DataStore:GetColoredCharacterName(upgradeInfo[1])
+            local characterServer, characterName = CharacterServerAndNameFromKey(upgradeInfo[1])
             return "HandMeDowns! Send this to " .. characterName .. "@" .. characterServer .. "."
         end
     end)()
@@ -228,7 +263,7 @@ end
 -- *** Finding the best character for an item
 
 ---Finds the best character to wear a given item
----@param link string|number
+---@param link ItemInfo
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindBestCharacterForItem(link)
     local bind = GetItemBind(link)
@@ -250,7 +285,7 @@ function HandMeDowns:FindBestCharacterForItem(link)
 end
 
 ---@param accountName string
----@param itemLink string|number
+---@param itemLink ItemInfo
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharactersOnAccount(accountName, itemLink)
     -- TODO: instead of going through all realms and characters, go through a priorized list
@@ -267,7 +302,7 @@ end
 
 ---@param realmName string
 ---@param accountName string
----@param itemLink string|number
+---@param itemLink ItemInfo
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharactersOnRealm(realmName, accountName, itemLink)
     for _, character in pairs(DataStore:GetCharacters(realmName, accountName)) do
@@ -284,10 +319,14 @@ end
 ---Retrieves upgrade information about the given item for the character.
 ---If the item is an upgrade, upgrade info is returned, `nil` otherwise.
 ---
----@param itemLink string|number
+---@param itemLink ItemInfo
 ---@param character string
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
+    if not CanCharacterEquipItem(character, itemLink) then
+        return
+    end
+
     local bestCompareItem = HandMeDowns:GetBestCompareItem(itemLink, character)
     if not bestCompareItem then
         -- no item to compare against
@@ -311,7 +350,7 @@ end
 
 ---Finds the best item as comparison for the given item.
 ---
----@param itemLink string|number The item to compare against.
+---@param itemLink ItemInfo The item to compare against.
 ---@param character string The character to search within.
 ---@return ItemInfo?
 function HandMeDowns:GetBestCompareItem(itemLink, character)
@@ -360,7 +399,8 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
 
     ---@type ItemInfo?
     local bestItem
-    local items = tableConcat(tableConcat(getEquippedItems(), getBagItems()), getMailItems())
+    -- local items = tableConcat(tableConcat(getEquippedItems(), getBagItems()), getMailItems())
+    local items = getEquippedItems()
     for _, item in ipairs(items) do
         if not bestItem then
             bestItem = item
