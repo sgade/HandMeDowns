@@ -102,10 +102,7 @@ local function GetEquippedItemsForEquipLocation(character, equipLocation)
     end
 
     local getItem = function(slotId)
-        if character == DataStore.ThisCharKey then
-            return GetInventoryItemID("player", slotId)
-        end
-        return DataStore.GetInventoryItem(character, slotId)
+        return DataStore:GetInventoryItem(character, slotId)
     end
 
     if equipLocation == "INVTYPE_FINGER" then
@@ -140,15 +137,13 @@ end
 
 -- Reimplementation from DataStore_Containers
 local function IterateBagItems(character, callback)
-    if not character.Containers then return end
-
-    for containerId, container in pairs(character.Containers) do
+    for containerId, container in pairs(DataStore:GetContainers(character)) do
         for slotId = 1, DataStore:GetContainerSize(character, containerId) do
-            local itemId = DataStore:GetSlotInfo(container, slotId)
+            local itemId, itemLink = DataStore:GetSlotInfo(container, slotId)
 
             -- Callback only if there is an item in that slot
-            if itemId then
-                callback(containerId, container, slotId, itemId)
+            if itemId and itemLink then
+                callback(containerId, container, slotId, itemId, itemLink)
             end
         end
     end
@@ -220,7 +215,9 @@ function HandMeDowns:OnTooltipSetItem(frame, ...)
         if upgradeInfo[1] == DataStore.ThisCharKey then
             return "Use here!"
         else
-            local characterServer, characterName = CharacterServerAndNameFromKey(upgradeInfo[1])
+            -- local characterServer, characterName = CharacterServerAndNameFromKey(upgradeInfo[1])
+            local characterServer = "DEFAULT"
+            local characterName = DataStore:GetColoredCharacterName(upgradeInfo[1])
             return "HandMeDowns! Send this to " .. characterName .. "@" .. characterServer .. "."
         end
     end)()
@@ -249,14 +246,17 @@ function HandMeDowns:FindBestCharacterForItem(link)
     -- DataStore:GetCharacter(): usually "Default.Server.Name"
 
     -- assuming "this account" is the warband
-    return HandMeDowns:FindUpgradeForCharacterOnAccount(DataStore.ThisAccount, link)
+    return HandMeDowns:FindUpgradeForCharactersOnAccount(DataStore.ThisAccount, link)
 end
 
+---@param accountName string
+---@param itemLink string|number
 ---@return [string, number, number]? upgradeInfo
-function HandMeDowns:FindUpgradeForCharacterOnAccount(account, itemLink)
+function HandMeDowns:FindUpgradeForCharactersOnAccount(accountName, itemLink)
     -- TODO: instead of going through all realms and characters, go through a priorized list
-    for realm in pairs(DataStore:GetRealms(account)) do
-        local upgradeInfo = HandMeDowns:FindUpgradeForCharacterOnRealm(realm, account, itemLink)
+    for realmName in pairs(DataStore:GetRealms(accountName)) do
+        local upgradeInfo = HandMeDowns:FindUpgradeForCharactersOnRealm(realmName, accountName, itemLink)
+
         if upgradeInfo then
             return upgradeInfo
         end
@@ -265,9 +265,12 @@ function HandMeDowns:FindUpgradeForCharacterOnAccount(account, itemLink)
     return nil
 end
 
+---@param realmName string
+---@param accountName string
+---@param itemLink string|number
 ---@return [string, number, number]? upgradeInfo
-function HandMeDowns:FindUpgradeForCharacterOnRealm(realm, account, itemLink)
-    for characterName, character in pairs(DataStore:GetCharacters(realm, account)) do
+function HandMeDowns:FindUpgradeForCharactersOnRealm(realmName, accountName, itemLink)
+    for _, character in pairs(DataStore:GetCharacters(realmName, accountName)) do
         local upgradeInfo = HandMeDowns:FindUpgradeForCharacter(itemLink, character)
 
         if upgradeInfo then
@@ -291,17 +294,17 @@ function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
         return
     end
 
-    local availableItemLevel = GetActualItemLevel(bestCompareItem)
+    local compareItemLevel = GetActualItemLevel(bestCompareItem)
     local itemLevel = GetActualItemLevel(itemLink)
 
-    if availableItemLevel > itemLevel then
-        -- available item is better than the one we compare for
+    if compareItemLevel >= itemLevel then
+        -- available item is equal or bbetter than the one we compare for
         return
     end
 
     return {
         character,
-        availableItemLevel,
+        compareItemLevel,
         itemLevel
     }
 end
@@ -316,28 +319,19 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
 
     -- inventory
     ---@return ItemInfo[]
-    local getInventoryItems = function()
-        if not DataStore.GetInventoryItem then
-            HandMeDowns:Print("warn: DataStore.GetInventoryItem not available.")
-            return {}
-        end
-
+    local getEquippedItems = function()
         return GetEquippedItemsForEquipLocation(character, equipmentLocation)
     end
 
     -- bags
     ---@return ItemInfo[]
     local getBagItems = function()
-        -- if not DataStore.IterateBags then
-        --     HandMeDowns:Print("warn: DataStore.IterateBags not available.")
-        --     return {}
-        -- end
-
         ---@type ItemInfo[]
         local items = {}
-        IterateBagItems(character, function(containerId, container, slotId, itemId)
-            if GetItemEquipLocation(itemId) then
-                table.insert(items, itemId)
+        IterateBagItems(character, function(containerId, container, slotId, itemId, bagItemLink)
+            local bagEquipmentLocation = GetItemEquipLocation(bagItemLink)
+            if bagEquipmentLocation == equipmentLocation and bagItemLink ~= itemLink then
+                table.insert(items, bagItemLink)
             end
         end)
 
@@ -354,9 +348,10 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
 
         ---@type ItemInfo[]
         local items = {}
-        DataStore:IterateMails(character, function(icon, count, itemLink, money, text, returned)
-            if GetItemEquipLocation(itemLink) == equipmentLocation then
-                table.insert(items, itemLink)
+        DataStore:IterateMails(character, function(icon, count, mailItemLink, money, text, returned)
+            local mailEquipmentLocation = GetItemEquipLocation(mailItemLink)
+            if mailEquipmentLocation == equipmentLocation and mailItemLink ~= itemLink then
+                table.insert(items, mailItemLink)
             end
         end)
 
@@ -365,7 +360,7 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
 
     ---@type ItemInfo?
     local bestItem
-    local items = tableConcat(tableConcat(getInventoryItems(), getBagItems()), getMailItems())
+    local items = tableConcat(tableConcat(getEquippedItems(), getBagItems()), getMailItems())
     for _, item in ipairs(items) do
         if not bestItem then
             bestItem = item
@@ -379,5 +374,8 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
         end
     end
 
+    if bestItem then
+        HandMeDowns:Print("Best item for " .. character .. ": " .. bestItem .. " (iLevel " .. GetActualItemLevel(bestItem) .. ")")
+    end
     return bestItem
 end
