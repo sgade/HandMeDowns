@@ -408,7 +408,7 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
             local bestItemLevel = GetActualItemLevel(bestItem)
             local itemLevel = GetActualItemLevel(item)
 
-            if bestItemLevel > itemLevel then
+            if bestItemLevel and itemLevel and bestItemLevel > itemLevel then
                 bestItem = item
             end
         end
