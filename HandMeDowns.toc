@@ -5,7 +5,6 @@
 ## Version: @project-version@
 ## Dependencies: DataStore, DataStore_Inventory, DataStore_Containers, DataStore_Mails
 ## X-Website: https://github.com/sgade/HandMeDowns
-## X-Curse-Project-ID: 918022
 
 embeds.xml
 
