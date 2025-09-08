@@ -86,8 +86,10 @@ local function CanCharacterEquipItem(character, itemLink)
     elseif itemSubType == "Miscellaneous" then
         -- trinkets, rings, etc
         classesThatWearTheItemSubType = {"Warrior", "Paladin", "Deathknight", "Hunter", "Shaman", "Evoker", "Rogue", "Monk", "Druid", "Demonhunter", "Priest", "Mage", "Warlock"}
+    --@alpha@
     else
         HandMeDowns:Print("warn: unknown armor type '" .. itemSubType .. "'")
+    --@end-alpha@
     end
 
     -- TODO: this could be a localized class name, then it would only work on english clients
@@ -209,7 +211,9 @@ end
 function HandMeDowns:OnEnable()
     HandMeDowns:HookItemTooltips()
 
+    --@debug@
     HandMeDowns:Print("Ready.")
+    --@end-debug@
 end
 
 function HandMeDowns:HookItemTooltips()
@@ -228,7 +232,9 @@ function HandMeDowns:HookItemTooltips()
 end
 
 function HandMeDowns:OnDisable()
+    --@debug@
     HandMeDowns:Print("Disabled.")
+    --@end-debug@
 end
 
 -- *** Setting the tooltip
@@ -381,7 +387,9 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
     ---@return ItemInfo[]
     local getMailItems = function()
         if not DataStore.IterateMails then
+            --@alpha@
             HandMeDowns:Print("warn: DataStore.IterateMails not available.")
+            --@end-alpha@
             return {}
         end
 
@@ -414,8 +422,10 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
         end
     end
 
+    --@debug@
     if bestItem then
         HandMeDowns:Print("Best item for " .. character .. ": " .. bestItem .. " (iLevel " .. GetActualItemLevel(bestItem) .. ")")
     end
+    --@end-debug@
     return bestItem
 end
