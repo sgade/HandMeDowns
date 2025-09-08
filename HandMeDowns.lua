@@ -342,6 +342,20 @@ function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
     local compareItemLevel = GetActualItemLevel(bestCompareItem)
     local itemLevel = GetActualItemLevel(itemLink)
 
+    if not compareItemLevel or not itemLevel then
+        --@debug@
+        if not compareItemLevel then
+            HandMeDowns:Print("compareItemLevel is nil.")
+        end
+        if not itemLevel then
+            HandMeDowns:Print("itemLevel is nil.")
+        end
+        --@end-debug@
+
+        -- comparison not possible
+        return
+    end
+
     if compareItemLevel >= itemLevel then
         -- available item is equal or bbetter than the one we compare for
         return
