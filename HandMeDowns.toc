@@ -3,7 +3,7 @@
 ## Notes: Recommends twinks for warbound gear
 ## Author: Kiaro-Frostwolf
 ## Version: @project-version@
-## Dependencies: DataStore, DataStore_Inventory, DataStore_Containers, DataStore_Mails
+## Dependencies: DataStore, DataStore_Characters, DataStore_Inventory, DataStore_Containers, DataStore_Mails
 ## Category-enUS: Equipment
 ## Category-deDE: Ausrüstung
 ## Category-esES: Equipo

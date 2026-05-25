@@ -53,9 +53,9 @@ local function GetItemBind(link)
 end
 
 ---@param link ItemInfo
-local function GetItemTypeAndSubType(link)
-    local _, _, _, _, _, itemType, itemSubType = C_Item.GetItemInfo(link)
-    return itemType, itemSubType
+local function GetItemClassAndSubclass(link)
+    local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(link)
+    return classID, subclassID
 end
 
 ---@param link ItemInfo
@@ -69,31 +69,30 @@ end
 ---@param itemLink ItemInfo
 ---@return boolean
 local function CanCharacterEquipItem(character, itemLink)
-    local itemType, itemSubType = GetItemTypeAndSubType(itemLink)
-    if itemType ~= "Armor" then
+    local itemClassID, itemSubclassID = GetItemClassAndSubclass(itemLink)
+    if itemClassID ~= LE_ITEM_CLASS_ARMOR then
         return false
     end
 
     local classesThatWearTheItemSubType = {}
-    if itemSubType == "Cloth" then
-        classesThatWearTheItemSubType = {"Priest", "Mage", "Warlock"}
-    elseif itemSubType == "Leather" then
-        classesThatWearTheItemSubType = {"Rogue", "Monk", "Druid", "Demonhunter"}
-    elseif itemSubType == "Mail" then
-        classesThatWearTheItemSubType = {"Hunter", "Shaman", "Evoker"}
-    elseif itemSubType == "Plate" then
-        classesThatWearTheItemSubType = {"Warrior", "Paladin", "Deathknight"}
-    elseif itemSubType == "Miscellaneous" then
+    if itemSubclassID == LE_ITEM_ARMOR_CLOTH then
+        classesThatWearTheItemSubType = {"PRIEST", "MAGE", "WARLOCK"}
+    elseif itemSubclassID == LE_ITEM_ARMOR_LEATHER then
+        classesThatWearTheItemSubType = {"ROGUE", "MONK", "DRUID", "DEMONHUNTER"}
+    elseif itemSubclassID == LE_ITEM_ARMOR_MAIL then
+        classesThatWearTheItemSubType = {"HUNTER", "SHAMAN", "EVOKER"}
+    elseif itemSubclassID == LE_ITEM_ARMOR_PLATE then
+        classesThatWearTheItemSubType = {"WARRIOR", "PALADIN", "DEATHKNIGHT"}
+    elseif itemSubclassID == LE_ITEM_ARMOR_GENERIC then
         -- trinkets, rings, etc
-        classesThatWearTheItemSubType = {"Warrior", "Paladin", "Deathknight", "Hunter", "Shaman", "Evoker", "Rogue", "Monk", "Druid", "Demonhunter", "Priest", "Mage", "Warlock"}
+        classesThatWearTheItemSubType = {"WARRIOR", "PALADIN", "DEATHKNIGHT", "HUNTER", "SHAMAN", "EVOKER", "ROGUE", "MONK", "DRUID", "DEMONHUNTER", "PRIEST", "MAGE", "WARLOCK"}
     --@alpha@
     else
-        HandMeDowns:Print("warn: unknown armor type '" .. itemSubType .. "'")
+        HandMeDowns:Print("warn: unknown armor subclass '" .. tostring(itemSubclassID) .. "'")
     --@end-alpha@
     end
 
-    -- TODO: this could be a localized class name, then it would only work on english clients
-    local class = DataStore:GetCharacterClass(character)
+    local _, class = DataStore:GetCharacterClass(character)
 
     return arrayContains(classesThatWearTheItemSubType, class)
 end
@@ -164,9 +163,7 @@ end
 local function CanItemBeSentToTwink(bindType)
     ---@type Enum.ItemBind[]
     local relevantForTwinks = {
-        Enum.ItemBind.None,
         Enum.ItemBind.OnEquip,
-        Enum.ItemBind.OnUse,
         Enum.ItemBind.ToWoWAccount,
         Enum.ItemBind.ToBnetAccount,
         Enum.ItemBind.ToBnetAccountUntilEquipped
@@ -191,14 +188,7 @@ end
 ---@param key string
 ---@return string?, string?
 local function CharacterServerAndNameFromKey(key)
-    ---@type string?
-    local server = nil
-    ---@type string?
-    local name = nil
-    for part in string.gmatch(key, "%a+") do
-        server = name
-        name = part
-    end
+    local _, server, name = strsplit(".", key)
     return server, name
 end
 
@@ -273,7 +263,7 @@ end
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindBestCharacterForItem(link)
     local bind = GetItemBind(link)
-    if not bind or bind == Enum.ItemBind.None then
+    if not bind then
         -- item cannot be equipped
         return
     end
@@ -294,32 +284,41 @@ end
 ---@param itemLink ItemInfo
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharactersOnAccount(accountName, itemLink)
-    -- TODO: instead of going through all realms and characters, go through a priorized list
+    local upgrades = {}
     for realmName in pairs(DataStore:GetRealms(accountName)) do
-        local upgradeInfo = HandMeDowns:FindUpgradeForCharactersOnRealm(realmName, accountName, itemLink)
+        for _, character in pairs(DataStore:GetCharacters(realmName, accountName)) do
+            local upgradeInfo = HandMeDowns:FindUpgradeForCharacter(itemLink, character)
 
-        if upgradeInfo then
-            return upgradeInfo
+            if upgradeInfo then
+                table.insert(upgrades, upgradeInfo)
+            end
         end
     end
 
-    return nil
+    table.sort(upgrades, function(left, right)
+        local leftLevel = DataStore:GetCharacterLevel(left[1]) or 0
+        local rightLevel = DataStore:GetCharacterLevel(right[1]) or 0
+        if leftLevel ~= rightLevel then
+            return leftLevel > rightLevel
+        end
+
+        local leftItemLevel = DataStore:GetAverageItemLevel(left[1]) or 0
+        local rightItemLevel = DataStore:GetAverageItemLevel(right[1]) or 0
+        return leftItemLevel > rightItemLevel
+    end)
+
+    return upgrades[1]
 end
 
----@param realmName string
----@param accountName string
 ---@param itemLink ItemInfo
----@return [string, number, number]? upgradeInfo
-function HandMeDowns:FindUpgradeForCharactersOnRealm(realmName, accountName, itemLink)
-    for _, character in pairs(DataStore:GetCharacters(realmName, accountName)) do
-        local upgradeInfo = HandMeDowns:FindUpgradeForCharacter(itemLink, character)
-
-        if upgradeInfo then
-            return upgradeInfo
-        end
+---@param character string
+---@return boolean
+local function IsComparableItemForCharacter(itemLink, character)
+    if not itemLink then
+        return false
     end
 
-    return nil
+    return CanCharacterEquipItem(character, itemLink)
 end
 
 ---Retrieves upgrade information about the given item for the character.
@@ -333,31 +332,19 @@ function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
         return
     end
 
-    local bestCompareItem = HandMeDowns:GetBestCompareItem(itemLink, character)
-    if not bestCompareItem then
-        -- no item to compare against
-        return
-    end
-
-    local compareItemLevel = GetActualItemLevel(bestCompareItem)
     local itemLevel = GetActualItemLevel(itemLink)
-
-    if not compareItemLevel or not itemLevel then
-        --@debug@
-        if not compareItemLevel then
-            HandMeDowns:Print("compareItemLevel is nil.")
-        end
-        if not itemLevel then
-            HandMeDowns:Print("itemLevel is nil.")
-        end
-        --@end-debug@
-
+    if not itemLevel then
         -- comparison not possible
         return
     end
 
+    local compareItemLevel = HandMeDowns:GetBestCompareItemLevel(itemLink, character)
+    if not compareItemLevel then
+        compareItemLevel = 0
+    end
+
     if compareItemLevel >= itemLevel then
-        -- available item is equal or bbetter than the one we compare for
+        -- available item is equal or better than the one we compare for
         return
     end
 
@@ -368,12 +355,12 @@ function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
     }
 end
 
----Finds the best item as comparison for the given item.
+---Finds the best available item level as comparison for the given item.
 ---
 ---@param itemLink ItemInfo The item to compare against.
 ---@param character string The character to search within.
----@return ItemInfo?
-function HandMeDowns:GetBestCompareItem(itemLink, character)
+---@return number?
+function HandMeDowns:GetBestCompareItemLevel(itemLink, character)
     local equipmentLocation = GetItemEquipLocation(itemLink)
 
     -- inventory
@@ -389,7 +376,7 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
         local items = {}
         IterateBagItems(character, function(containerId, container, slotId, itemId, bagItemLink)
             local bagEquipmentLocation = GetItemEquipLocation(bagItemLink)
-            if bagEquipmentLocation == equipmentLocation and bagItemLink ~= itemLink then
+            if bagEquipmentLocation == equipmentLocation and bagItemLink ~= itemLink and IsComparableItemForCharacter(bagItemLink, character) then
                 table.insert(items, bagItemLink)
             end
         end)
@@ -410,8 +397,8 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
         ---@type ItemInfo[]
         local items = {}
         DataStore:IterateMails(character, function(icon, count, mailItemLink, money, text, returned)
-            local mailEquipmentLocation = GetItemEquipLocation(mailItemLink)
-            if mailEquipmentLocation == equipmentLocation and mailItemLink ~= itemLink then
+            local mailEquipmentLocation = mailItemLink and GetItemEquipLocation(mailItemLink)
+            if mailEquipmentLocation == equipmentLocation and mailItemLink ~= itemLink and IsComparableItemForCharacter(mailItemLink, character) then
                 table.insert(items, mailItemLink)
             end
         end)
@@ -419,27 +406,23 @@ function HandMeDowns:GetBestCompareItem(itemLink, character)
         return items
     end
 
-    ---@type ItemInfo?
-    local bestItem
-    -- local items = tableConcat(tableConcat(getEquippedItems(), getBagItems()), getMailItems())
-    local items = getEquippedItems()
+    ---@type number?
+    local bestItemLevel
+    local items = tableConcat(tableConcat(getEquippedItems(), getBagItems()), getMailItems())
     for _, item in ipairs(items) do
-        if not bestItem then
-            bestItem = item
-        elseif item then
-            local bestItemLevel = GetActualItemLevel(bestItem)
+        if item and IsComparableItemForCharacter(item, character) then
             local itemLevel = GetActualItemLevel(item)
 
-            if bestItemLevel and itemLevel and bestItemLevel > itemLevel then
-                bestItem = item
+            if itemLevel and (not bestItemLevel or bestItemLevel < itemLevel) then
+                bestItemLevel = itemLevel
             end
         end
     end
 
     --@debug@
-    if bestItem then
-        HandMeDowns:Print("Best item for " .. character .. ": " .. bestItem .. " (iLevel " .. GetActualItemLevel(bestItem) .. ")")
+    if bestItemLevel then
+        HandMeDowns:Print("Best item level for " .. character .. ": " .. bestItemLevel)
     end
     --@end-debug@
-    return bestItem
+    return bestItemLevel
 end
