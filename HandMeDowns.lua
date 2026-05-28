@@ -56,6 +56,8 @@ local function clearTable(table)
 end
 
 local ItemClassArmor = (Enum and Enum.ItemClass and Enum.ItemClass.Armor) or LE_ITEM_CLASS_ARMOR or 4
+local ItemClassWeapon = (Enum and Enum.ItemClass and Enum.ItemClass.Weapon) or LE_ITEM_CLASS_WEAPON or 2
+
 local ArmorSubclass = {
     Generic = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Generic) or LE_ITEM_ARMOR_GENERIC or 0,
     Cloth = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Cloth) or LE_ITEM_ARMOR_CLOTH or 1,
@@ -65,12 +67,38 @@ local ArmorSubclass = {
     Shield = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Shield) or LE_ITEM_ARMOR_SHIELD or 6,
 }
 
+local WeaponSubclass = {
+    Axe = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Axe) or LE_ITEM_WEAPON_AXE1H or 0,
+    Axe2H = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Axe2H) or LE_ITEM_WEAPON_AXE2H or 1,
+    Bow = (Enum and Enum.ItemWeaponSubclass and (Enum.ItemWeaponSubclass.Bow or Enum.ItemWeaponSubclass.Bows)) or LE_ITEM_WEAPON_BOWS or 2,
+    Gun = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Gun) or LE_ITEM_WEAPON_GUNS or 3,
+    Mace = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Mace) or LE_ITEM_WEAPON_MACE1H or 4,
+    Mace2H = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Mace2H) or LE_ITEM_WEAPON_MACE2H or 5,
+    Polearm = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Polearm) or LE_ITEM_WEAPON_POLEARM or 6,
+    Sword = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Sword) or LE_ITEM_WEAPON_SWORD1H or 7,
+    Sword2H = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Sword2H) or LE_ITEM_WEAPON_SWORD2H or 8,
+    Warglaive = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Warglaive) or LE_ITEM_WEAPON_WARGLAIVE or 9,
+    Staff = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Staff) or LE_ITEM_WEAPON_STAFF or 10,
+    Fist = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Fist) or LE_ITEM_WEAPON_UNARMED or 13,
+    Dagger = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Dagger) or LE_ITEM_WEAPON_DAGGER or 15,
+    Crossbow = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Crossbow) or LE_ITEM_WEAPON_CROSSBOW or 18,
+    Wand = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Wand) or LE_ITEM_WEAPON_WAND or 19,
+    FishingPole = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.FishingPole) or LE_ITEM_WEAPON_FISHINGPOLE or 20,
+}
+
 local ArmorSubclassClasses = {}
-local WarnedArmorSubclasses = {}
+local WeaponSubclassClasses = {}
+local WarnedItemSubclasses = {}
 
 local function SetArmorSubclassClasses(subclassID, classes)
     if subclassID then
         ArmorSubclassClasses[subclassID] = classes
+    end
+end
+
+local function SetWeaponSubclassClasses(subclassID, classes)
+    if subclassID then
+        WeaponSubclassClasses[subclassID] = classes
     end
 end
 
@@ -80,6 +108,23 @@ SetArmorSubclassClasses(ArmorSubclass.Mail, {"HUNTER", "SHAMAN", "EVOKER"})
 SetArmorSubclassClasses(ArmorSubclass.Plate, {"WARRIOR", "PALADIN", "DEATHKNIGHT"})
 SetArmorSubclassClasses(ArmorSubclass.Shield, {"WARRIOR", "PALADIN", "SHAMAN"})
 SetArmorSubclassClasses(ArmorSubclass.Generic, {"WARRIOR", "PALADIN", "DEATHKNIGHT", "HUNTER", "SHAMAN", "EVOKER", "ROGUE", "MONK", "DRUID", "DEMONHUNTER", "PRIEST", "MAGE", "WARLOCK"})
+
+SetWeaponSubclassClasses(WeaponSubclass.Axe, {"WARRIOR", "PALADIN", "HUNTER", "ROGUE", "SHAMAN", "MONK", "DEMONHUNTER", "DEATHKNIGHT", "EVOKER"})
+SetWeaponSubclassClasses(WeaponSubclass.Axe2H, {"WARRIOR", "PALADIN", "HUNTER", "DEATHKNIGHT", "EVOKER"})
+SetWeaponSubclassClasses(WeaponSubclass.Bow, {"HUNTER"})
+SetWeaponSubclassClasses(WeaponSubclass.Gun, {"HUNTER"})
+SetWeaponSubclassClasses(WeaponSubclass.Mace, {"WARRIOR", "PALADIN", "PRIEST", "ROGUE", "SHAMAN", "MONK", "DRUID", "DEATHKNIGHT", "EVOKER"})
+SetWeaponSubclassClasses(WeaponSubclass.Mace2H, {"WARRIOR", "PALADIN", "DRUID", "DEATHKNIGHT", "EVOKER"})
+SetWeaponSubclassClasses(WeaponSubclass.Polearm, {"WARRIOR", "PALADIN", "HUNTER", "MONK", "DRUID", "DEATHKNIGHT"})
+SetWeaponSubclassClasses(WeaponSubclass.Sword, {"WARRIOR", "PALADIN", "HUNTER", "ROGUE", "MONK", "MAGE", "WARLOCK", "DEMONHUNTER", "DEATHKNIGHT", "EVOKER"})
+SetWeaponSubclassClasses(WeaponSubclass.Sword2H, {"WARRIOR", "PALADIN", "HUNTER", "DEATHKNIGHT", "EVOKER"})
+SetWeaponSubclassClasses(WeaponSubclass.Warglaive, {"DEMONHUNTER"})
+SetWeaponSubclassClasses(WeaponSubclass.Staff, {"WARRIOR", "HUNTER", "SHAMAN", "MONK", "DRUID", "PRIEST", "MAGE", "WARLOCK", "EVOKER"})
+SetWeaponSubclassClasses(WeaponSubclass.Fist, {"WARRIOR", "HUNTER", "ROGUE", "SHAMAN", "MONK", "DRUID", "DEMONHUNTER", "EVOKER"})
+SetWeaponSubclassClasses(WeaponSubclass.Dagger, {"WARRIOR", "HUNTER", "ROGUE", "SHAMAN", "DRUID", "PRIEST", "MAGE", "WARLOCK", "DEMONHUNTER", "EVOKER"})
+SetWeaponSubclassClasses(WeaponSubclass.Crossbow, {"HUNTER"})
+SetWeaponSubclassClasses(WeaponSubclass.Wand, {"PRIEST", "MAGE", "WARLOCK"})
+SetWeaponSubclassClasses(WeaponSubclass.FishingPole, {"WARRIOR", "PALADIN", "DEATHKNIGHT", "HUNTER", "SHAMAN", "EVOKER", "ROGUE", "MONK", "DRUID", "DEMONHUNTER", "PRIEST", "MAGE", "WARLOCK"})
 
 ---@param link ItemInfo
 ---@return Enum.ItemBind bindType
@@ -94,6 +139,21 @@ local function GetItemClassAndSubclass(link)
     return classID, subclassID
 end
 
+local function AreComparableItemTypes(itemLink, compareItemLink)
+    local itemClassID, itemSubclassID = GetItemClassAndSubclass(itemLink)
+    local compareItemClassID, compareItemSubclassID = GetItemClassAndSubclass(compareItemLink)
+
+    if itemClassID ~= compareItemClassID then
+        return false
+    end
+
+    if itemClassID == ItemClassWeapon then
+        return itemSubclassID == compareItemSubclassID
+    end
+
+    return true
+end
+
 ---@param link ItemInfo
 ---@return number
 local function GetActualItemLevel(link)
@@ -106,16 +166,22 @@ end
 ---@return boolean
 local function CanCharacterEquipItem(character, itemLink)
     local itemClassID, itemSubclassID = GetItemClassAndSubclass(itemLink)
-    if itemClassID ~= ItemClassArmor then
+    local classesThatCanUseItem = nil
+
+    if itemClassID == ItemClassArmor then
+        classesThatCanUseItem = ArmorSubclassClasses[itemSubclassID]
+    elseif itemClassID == ItemClassWeapon then
+        classesThatCanUseItem = WeaponSubclassClasses[itemSubclassID]
+    else
         return false
     end
 
-    local classesThatWearTheItemSubType = ArmorSubclassClasses[itemSubclassID]
-    if not classesThatWearTheItemSubType then
+    if not classesThatCanUseItem then
         --@alpha@
-        if not WarnedArmorSubclasses[itemSubclassID] then
-            WarnedArmorSubclasses[itemSubclassID] = true
-            HandMeDowns:Print("warn: unknown armor subclass '" .. tostring(itemSubclassID) .. "'")
+        local warningKey = tostring(itemClassID) .. "." .. tostring(itemSubclassID)
+        if not WarnedItemSubclasses[warningKey] then
+            WarnedItemSubclasses[warningKey] = true
+            HandMeDowns:Print("warn: unknown item subclass '" .. warningKey .. "'")
         end
         --@end-alpha@
         return false
@@ -123,12 +189,34 @@ local function CanCharacterEquipItem(character, itemLink)
 
     local _, class = DataStore:GetCharacterClass(character)
 
-    return arrayContains(classesThatWearTheItemSubType, class)
+    return arrayContains(classesThatCanUseItem, class)
 end
 
 local function GetItemEquipLocation(link)
     local _, _, _, _, _, _, _, _, itemEquipLoc = C_Item.GetItemInfo(link)
     return itemEquipLoc
+end
+
+local OneHandWeaponEquipLocations = {
+    INVTYPE_WEAPON = true,
+    INVTYPE_WEAPONMAINHAND = true,
+    INVTYPE_WEAPONOFFHAND = true,
+}
+
+local function EquipLocationsMatch(candidateEquipLocation, targetEquipLocation)
+    if candidateEquipLocation == targetEquipLocation then
+        return true
+    end
+
+    if targetEquipLocation == "INVTYPE_WEAPON" then
+        return OneHandWeaponEquipLocations[candidateEquipLocation]
+    elseif targetEquipLocation == "INVTYPE_WEAPONMAINHAND" then
+        return candidateEquipLocation == "INVTYPE_WEAPON"
+    elseif targetEquipLocation == "INVTYPE_WEAPONOFFHAND" then
+        return candidateEquipLocation == "INVTYPE_WEAPON"
+    end
+
+    return false
 end
 
 local EquipLocToSlotID = {
@@ -181,6 +269,11 @@ local function GetEquippedItemsForEquipLocation(character, equipLocation)
         return {
             getItem(INVSLOT_TRINKET1),
             getItem(INVSLOT_TRINKET2)
+        }
+    elseif equipLocation == "INVTYPE_WEAPON" then
+        return {
+            getItem(INVSLOT_MAINHAND),
+            getItem(INVSLOT_OFFHAND)
         }
     else
         return { getItem(slotId) }
@@ -432,15 +525,20 @@ function HandMeDowns:FindUpgradeForCharactersOnAccount(accountName, itemLink)
     return upgrades[1]
 end
 
----@param itemLink ItemInfo
+---@param candidateItemLink ItemInfo
+---@param targetItemLink ItemInfo
 ---@param character string
 ---@return boolean
-local function IsComparableItemForCharacter(itemLink, character)
-    if not itemLink then
+local function IsComparableItemForCharacter(candidateItemLink, targetItemLink, character)
+    if not candidateItemLink or not targetItemLink then
         return false
     end
 
-    return CanCharacterEquipItem(character, itemLink)
+    if not AreComparableItemTypes(targetItemLink, candidateItemLink) then
+        return false
+    end
+
+    return CanCharacterEquipItem(character, candidateItemLink)
 end
 
 ---Retrieves upgrade information about the given item for the character.
@@ -502,7 +600,7 @@ function HandMeDowns:GetBestCompareItemLevel(itemLink, character)
         local items = {}
         IterateStoredContainerItems(character, function(containerId, container, slotId, itemId, storedItemLink)
             local storedEquipmentLocation = GetItemEquipLocation(storedItemLink)
-            if storedEquipmentLocation == equipmentLocation and storedItemLink ~= itemLink and IsComparableItemForCharacter(storedItemLink, character) then
+            if EquipLocationsMatch(storedEquipmentLocation, equipmentLocation) and storedItemLink ~= itemLink and IsComparableItemForCharacter(storedItemLink, itemLink, character) then
                 table.insert(items, storedItemLink)
             end
         end)
@@ -524,7 +622,7 @@ function HandMeDowns:GetBestCompareItemLevel(itemLink, character)
         local items = {}
         DataStore:IterateMails(character, function(icon, count, mailItemLink, money, text, returned)
             local mailEquipmentLocation = mailItemLink and GetItemEquipLocation(mailItemLink)
-            if mailEquipmentLocation == equipmentLocation and mailItemLink ~= itemLink and IsComparableItemForCharacter(mailItemLink, character) then
+            if EquipLocationsMatch(mailEquipmentLocation, equipmentLocation) and mailItemLink ~= itemLink and IsComparableItemForCharacter(mailItemLink, itemLink, character) then
                 table.insert(items, mailItemLink)
             end
         end)
@@ -536,7 +634,7 @@ function HandMeDowns:GetBestCompareItemLevel(itemLink, character)
     local bestItemLevel
     local items = tableConcat(tableConcat(getEquippedItems(), getStoredContainerItems()), getMailItems())
     for _, item in ipairs(items) do
-        if item and IsComparableItemForCharacter(item, character) then
+        if item and IsComparableItemForCharacter(item, itemLink, character) then
             local itemLevel = GetActualItemLevel(item)
 
             if itemLevel and (not bestItemLevel or bestItemLevel < itemLevel) then
