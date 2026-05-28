@@ -184,8 +184,9 @@ local function CanItemBeSentToTwink(bindType)
     return arrayContains(relevantForTwinks, bindType)
 end
 
--- Reimplementation from DataStore_Containers
-local function IterateBagItems(character, callback)
+-- Reimplementation from DataStore_Containers. DataStore_Containers stores both
+-- bag and bank-like containers, depending on what has been scanned for a character.
+local function IterateStoredContainerItems(character, callback)
     local containers = DataStore:GetContainers(character)
     if not containers then
         return
@@ -302,6 +303,11 @@ function HandMeDowns:FindBestCharacterForItem(link)
     -- DataStore.ThisAccount: usually "Default"
     -- DataStore:GetCharacter(): usually "Default.Server.Name"
 
+    local currentCharacterUpgrade = HandMeDowns:FindUpgradeForCharacter(link, DataStore.ThisCharKey)
+    if currentCharacterUpgrade then
+        return currentCharacterUpgrade
+    end
+
     -- assuming "this account" is the warband
     return HandMeDowns:FindUpgradeForCharactersOnAccount(DataStore.ThisAccount, link)
 end
@@ -313,7 +319,10 @@ function HandMeDowns:FindUpgradeForCharactersOnAccount(accountName, itemLink)
     local upgrades = {}
     for realmName in pairs(DataStore:GetRealms(accountName)) do
         for _, character in pairs(DataStore:GetCharacters(realmName, accountName)) do
-            local upgradeInfo = HandMeDowns:FindUpgradeForCharacter(itemLink, character)
+            local upgradeInfo
+            if character ~= DataStore.ThisCharKey then
+                upgradeInfo = HandMeDowns:FindUpgradeForCharacter(itemLink, character)
+            end
 
             if upgradeInfo then
                 table.insert(upgrades, upgradeInfo)
@@ -354,6 +363,10 @@ end
 ---@param character string
 ---@return [string, number, number]? upgradeInfo
 function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
+    if not character then
+        return
+    end
+
     if not CanCharacterEquipItem(character, itemLink) then
         return
     end
@@ -395,15 +408,15 @@ function HandMeDowns:GetBestCompareItemLevel(itemLink, character)
         return GetEquippedItemsForEquipLocation(character, equipmentLocation)
     end
 
-    -- bags
+    -- stored containers: bags and bank-like containers known to DataStore
     ---@return ItemInfo[]
-    local getBagItems = function()
+    local getStoredContainerItems = function()
         ---@type ItemInfo[]
         local items = {}
-        IterateBagItems(character, function(containerId, container, slotId, itemId, bagItemLink)
-            local bagEquipmentLocation = GetItemEquipLocation(bagItemLink)
-            if bagEquipmentLocation == equipmentLocation and bagItemLink ~= itemLink and IsComparableItemForCharacter(bagItemLink, character) then
-                table.insert(items, bagItemLink)
+        IterateStoredContainerItems(character, function(containerId, container, slotId, itemId, storedItemLink)
+            local storedEquipmentLocation = GetItemEquipLocation(storedItemLink)
+            if storedEquipmentLocation == equipmentLocation and storedItemLink ~= itemLink and IsComparableItemForCharacter(storedItemLink, character) then
+                table.insert(items, storedItemLink)
             end
         end)
 
@@ -434,7 +447,7 @@ function HandMeDowns:GetBestCompareItemLevel(itemLink, character)
 
     ---@type number?
     local bestItemLevel
-    local items = tableConcat(tableConcat(getEquippedItems(), getBagItems()), getMailItems())
+    local items = tableConcat(tableConcat(getEquippedItems(), getStoredContainerItems()), getMailItems())
     for _, item in ipairs(items) do
         if item and IsComparableItemForCharacter(item, character) then
             local itemLevel = GetActualItemLevel(item)
