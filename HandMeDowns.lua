@@ -22,6 +22,10 @@
 
 HandMeDowns = LibStub("AceAddon-3.0"):NewAddon("HandMeDowns", "AceConsole-3.0")
 
+local TooltipRecommendationCache = {}
+local CacheMiss = {}
+local CacheInvalidationFrame
+
 local function arrayContains(array, element)
     for _, value in ipairs(array) do
         if value == element then
@@ -43,6 +47,12 @@ local function tableConcat(table1, table2)
         table1[#table1+1] = table2[i]
     end
     return table1
+end
+
+local function clearTable(table)
+    for key in pairs(table) do
+        table[key] = nil
+    end
 end
 
 local ItemClassArmor = (Enum and Enum.ItemClass and Enum.ItemClass.Armor) or LE_ITEM_CLASS_ARMOR or 4
@@ -221,11 +231,15 @@ end
 -- *** Lifecyle
 
 function HandMeDowns:OnInitialize()
-    -- stub
+    CacheInvalidationFrame = CreateFrame("Frame")
+    CacheInvalidationFrame:SetScript("OnEvent", function()
+        HandMeDowns:InvalidateRecommendationCache()
+    end)
 end
 
 function HandMeDowns:OnEnable()
     HandMeDowns:HookItemTooltips()
+    HandMeDowns:RegisterCacheInvalidationEvents()
 
     --@debug@
     HandMeDowns:Print("Ready.")
@@ -233,6 +247,12 @@ function HandMeDowns:OnEnable()
 end
 
 function HandMeDowns:HookItemTooltips()
+    if HandMeDowns.tooltipHooksRegistered then
+        return
+    end
+
+    HandMeDowns.tooltipHooksRegistered = true
+
     local function onTooltipSetItem(frame, ...)
         local success, errorMessage = pcall(HandMeDowns.OnTooltipSetItem, HandMeDowns, frame, ...)
         if not success then
@@ -255,9 +275,54 @@ function HandMeDowns:HookItemTooltips()
 end
 
 function HandMeDowns:OnDisable()
+    if CacheInvalidationFrame then
+        CacheInvalidationFrame:UnregisterAllEvents()
+    end
+
+    HandMeDowns:ClearRecommendationCache()
+
     --@debug@
     HandMeDowns:Print("Disabled.")
     --@end-debug@
+end
+
+function HandMeDowns:RegisterCacheInvalidationEvents()
+    if not CacheInvalidationFrame then
+        return
+    end
+
+    local events = {
+        "BAG_UPDATE_DELAYED",
+        "BANKFRAME_CLOSED",
+        "GET_ITEM_INFO_RECEIVED",
+        "MAIL_CLOSED",
+        "MAIL_INBOX_UPDATE",
+        "MAIL_SEND_SUCCESS",
+        "MAIL_SUCCESS",
+        "PLAYER_AVG_ITEM_LEVEL_UPDATE",
+        "PLAYER_EQUIPMENT_CHANGED",
+        "PLAYER_LEVEL_UP",
+        "PLAYERBANKSLOTS_CHANGED",
+        "PLAYERREAGENTBANKSLOTS_CHANGED",
+    }
+
+    for _, eventName in ipairs(events) do
+        pcall(CacheInvalidationFrame.RegisterEvent, CacheInvalidationFrame, eventName)
+    end
+end
+
+function HandMeDowns:ClearRecommendationCache()
+    clearTable(TooltipRecommendationCache)
+end
+
+function HandMeDowns:InvalidateRecommendationCache()
+    HandMeDowns:ClearRecommendationCache()
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0.5, function()
+            HandMeDowns:ClearRecommendationCache()
+        end)
+    end
 end
 
 -- *** Setting the tooltip
@@ -272,7 +337,7 @@ function HandMeDowns:OnTooltipSetItem(frame, ...)
         return
     end
 
-    local upgradeInfo = HandMeDowns:FindBestCharacterForItem(itemLink)
+    local upgradeInfo = HandMeDowns:GetCachedBestCharacterForItem(itemLink)
     if not upgradeInfo then
         return
     end
@@ -290,6 +355,22 @@ function HandMeDowns:OnTooltipSetItem(frame, ...)
 end
 
 -- *** Finding the best character for an item
+
+---Finds the best character to wear a given item, using a data-lifetime cache.
+---@param link ItemInfo
+---@return [string, number, number]? upgradeInfo
+function HandMeDowns:GetCachedBestCharacterForItem(link)
+    local cachedUpgradeInfo = TooltipRecommendationCache[link]
+    if cachedUpgradeInfo == CacheMiss then
+        return
+    elseif cachedUpgradeInfo then
+        return cachedUpgradeInfo
+    end
+
+    local upgradeInfo = HandMeDowns:FindBestCharacterForItem(link)
+    TooltipRecommendationCache[link] = upgradeInfo or CacheMiss
+    return upgradeInfo
+end
 
 ---Finds the best character to wear a given item
 ---@param link ItemInfo

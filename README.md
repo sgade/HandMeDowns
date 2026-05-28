@@ -16,6 +16,11 @@ or in the mailbox.
 Required item level is intentionally not checked, so gear can be sent to an alt
 for later leveling.
 
+Recommendation results are cached by item link and cleared when local bag, bank,
+mail, equipment, level, or item-info data changes. Cache invalidation is repeated
+briefly after those events so DataStore has time to finish scanning the changed
+data.
+
 ## Requirements
 
 - DataStore
