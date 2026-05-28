@@ -45,6 +45,29 @@ local function tableConcat(table1, table2)
     return table1
 end
 
+local ItemClassArmor = (Enum and Enum.ItemClass and Enum.ItemClass.Armor) or LE_ITEM_CLASS_ARMOR or 4
+local ArmorSubclass = {
+    Generic = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Generic) or LE_ITEM_ARMOR_GENERIC or 0,
+    Cloth = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Cloth) or LE_ITEM_ARMOR_CLOTH or 1,
+    Leather = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Leather) or LE_ITEM_ARMOR_LEATHER or 2,
+    Mail = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Mail) or LE_ITEM_ARMOR_MAIL or 3,
+    Plate = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Plate) or LE_ITEM_ARMOR_PLATE or 4,
+}
+
+local ArmorSubclassClasses = {}
+
+local function SetArmorSubclassClasses(subclassID, classes)
+    if subclassID then
+        ArmorSubclassClasses[subclassID] = classes
+    end
+end
+
+SetArmorSubclassClasses(ArmorSubclass.Cloth, {"PRIEST", "MAGE", "WARLOCK"})
+SetArmorSubclassClasses(ArmorSubclass.Leather, {"ROGUE", "MONK", "DRUID", "DEMONHUNTER"})
+SetArmorSubclassClasses(ArmorSubclass.Mail, {"HUNTER", "SHAMAN", "EVOKER"})
+SetArmorSubclassClasses(ArmorSubclass.Plate, {"WARRIOR", "PALADIN", "DEATHKNIGHT"})
+SetArmorSubclassClasses(ArmorSubclass.Generic, {"WARRIOR", "PALADIN", "DEATHKNIGHT", "HUNTER", "SHAMAN", "EVOKER", "ROGUE", "MONK", "DRUID", "DEMONHUNTER", "PRIEST", "MAGE", "WARLOCK"})
+
 ---@param link ItemInfo
 ---@return Enum.ItemBind bindType
 local function GetItemBind(link)
@@ -70,26 +93,16 @@ end
 ---@return boolean
 local function CanCharacterEquipItem(character, itemLink)
     local itemClassID, itemSubclassID = GetItemClassAndSubclass(itemLink)
-    if itemClassID ~= LE_ITEM_CLASS_ARMOR then
+    if itemClassID ~= ItemClassArmor then
         return false
     end
 
-    local classesThatWearTheItemSubType = {}
-    if itemSubclassID == LE_ITEM_ARMOR_CLOTH then
-        classesThatWearTheItemSubType = {"PRIEST", "MAGE", "WARLOCK"}
-    elseif itemSubclassID == LE_ITEM_ARMOR_LEATHER then
-        classesThatWearTheItemSubType = {"ROGUE", "MONK", "DRUID", "DEMONHUNTER"}
-    elseif itemSubclassID == LE_ITEM_ARMOR_MAIL then
-        classesThatWearTheItemSubType = {"HUNTER", "SHAMAN", "EVOKER"}
-    elseif itemSubclassID == LE_ITEM_ARMOR_PLATE then
-        classesThatWearTheItemSubType = {"WARRIOR", "PALADIN", "DEATHKNIGHT"}
-    elseif itemSubclassID == LE_ITEM_ARMOR_GENERIC then
-        -- trinkets, rings, etc
-        classesThatWearTheItemSubType = {"WARRIOR", "PALADIN", "DEATHKNIGHT", "HUNTER", "SHAMAN", "EVOKER", "ROGUE", "MONK", "DRUID", "DEMONHUNTER", "PRIEST", "MAGE", "WARLOCK"}
-    --@alpha@
-    else
+    local classesThatWearTheItemSubType = ArmorSubclassClasses[itemSubclassID]
+    if not classesThatWearTheItemSubType then
+        --@alpha@
         HandMeDowns:Print("warn: unknown armor subclass '" .. tostring(itemSubclassID) .. "'")
-    --@end-alpha@
+        --@end-alpha@
+        return false
     end
 
     local _, class = DataStore:GetCharacterClass(character)
@@ -173,8 +186,14 @@ end
 
 -- Reimplementation from DataStore_Containers
 local function IterateBagItems(character, callback)
-    for containerId, container in pairs(DataStore:GetContainers(character)) do
-        for slotId = 1, DataStore:GetContainerSize(character, containerId) do
+    local containers = DataStore:GetContainers(character)
+    if not containers then
+        return
+    end
+
+    for containerId, container in pairs(containers) do
+        local containerSize = DataStore:GetContainerSize(character, containerId) or 0
+        for slotId = 1, containerSize do
             local itemId, itemLink = DataStore:GetSlotInfo(container, slotId)
 
             -- Callback only if there is an item in that slot
@@ -207,16 +226,23 @@ function HandMeDowns:OnEnable()
 end
 
 function HandMeDowns:HookItemTooltips()
+    local function onTooltipSetItem(frame, ...)
+        local success, errorMessage = pcall(HandMeDowns.OnTooltipSetItem, HandMeDowns, frame, ...)
+        if not success then
+            HandMeDowns:Print("tooltip error: " .. tostring(errorMessage))
+        end
+    end
+
     if TooltipDataProcessor then
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(frame, ...)
             if frame == GameTooltip and HandMeDowns:IsEnabled() then
-                return HandMeDowns:OnTooltipSetItem(frame, ...)
+                return onTooltipSetItem(frame, ...)
             end
         end)
     else
         -- legacy
         GameTooltip:HookScript('OnTooltipSetItem', function (...)
-            HandMeDowns:OnTooltipSetItem(...)
+            onTooltipSetItem(GameTooltip, ...)
         end)
     end
 end
