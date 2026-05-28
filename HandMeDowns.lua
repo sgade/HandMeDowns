@@ -52,9 +52,11 @@ local ArmorSubclass = {
     Leather = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Leather) or LE_ITEM_ARMOR_LEATHER or 2,
     Mail = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Mail) or LE_ITEM_ARMOR_MAIL or 3,
     Plate = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Plate) or LE_ITEM_ARMOR_PLATE or 4,
+    Shield = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Shield) or LE_ITEM_ARMOR_SHIELD or 6,
 }
 
 local ArmorSubclassClasses = {}
+local WarnedArmorSubclasses = {}
 
 local function SetArmorSubclassClasses(subclassID, classes)
     if subclassID then
@@ -66,6 +68,7 @@ SetArmorSubclassClasses(ArmorSubclass.Cloth, {"PRIEST", "MAGE", "WARLOCK"})
 SetArmorSubclassClasses(ArmorSubclass.Leather, {"ROGUE", "MONK", "DRUID", "DEMONHUNTER"})
 SetArmorSubclassClasses(ArmorSubclass.Mail, {"HUNTER", "SHAMAN", "EVOKER"})
 SetArmorSubclassClasses(ArmorSubclass.Plate, {"WARRIOR", "PALADIN", "DEATHKNIGHT"})
+SetArmorSubclassClasses(ArmorSubclass.Shield, {"WARRIOR", "PALADIN", "SHAMAN"})
 SetArmorSubclassClasses(ArmorSubclass.Generic, {"WARRIOR", "PALADIN", "DEATHKNIGHT", "HUNTER", "SHAMAN", "EVOKER", "ROGUE", "MONK", "DRUID", "DEMONHUNTER", "PRIEST", "MAGE", "WARLOCK"})
 
 ---@param link ItemInfo
@@ -100,7 +103,10 @@ local function CanCharacterEquipItem(character, itemLink)
     local classesThatWearTheItemSubType = ArmorSubclassClasses[itemSubclassID]
     if not classesThatWearTheItemSubType then
         --@alpha@
-        HandMeDowns:Print("warn: unknown armor subclass '" .. tostring(itemSubclassID) .. "'")
+        if not WarnedArmorSubclasses[itemSubclassID] then
+            WarnedArmorSubclasses[itemSubclassID] = true
+            HandMeDowns:Print("warn: unknown armor subclass '" .. tostring(itemSubclassID) .. "'")
+        end
         --@end-alpha@
         return false
     end
