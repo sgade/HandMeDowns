@@ -1,5 +1,7 @@
 # HandMeDowns
 
+[![GitHub Release](https://img.shields.io/github/v/release/sgade/HandMeDowns?sort=semver&display_name=release&style=for-the-badge&logo=github&color=rgb(20%2C4%2C120))](https://github.com/sgade/HandMeDowns/releases)
+
 Recommends alt characters for bind-on-equip and warbound gear.
 
 HandMeDowns uses DataStore to compare the hovered item against characters on the
