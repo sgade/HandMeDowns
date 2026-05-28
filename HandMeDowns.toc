@@ -1,4 +1,4 @@
-## Interface: 120005
+## Interface: 120005, 120007
 ## Title: HandMeDowns
 ## Notes: Recommends twinks for warbound gear
 ## Author: Kiaro-Frostwolf
