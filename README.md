@@ -29,10 +29,14 @@ mail, equipment, level, or item-info data changes. Cache invalidation is repeate
 briefly after those events so DataStore has time to finish scanning the changed
 data.
 
-## Requirements
+## Dependencies
 
 - DataStore
 - DataStore_Characters
 - DataStore_Inventory
 - DataStore_Containers
 - DataStore_Mails
+
+## Optional dependencies
+
+- DataStore_Talents
