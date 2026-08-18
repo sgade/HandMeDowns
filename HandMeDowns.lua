@@ -126,6 +126,191 @@ SetWeaponSubclassClasses(WeaponSubclass.Crossbow, {"HUNTER"})
 SetWeaponSubclassClasses(WeaponSubclass.Wand, {"PRIEST", "MAGE", "WARLOCK"})
 SetWeaponSubclassClasses(WeaponSubclass.FishingPole, {"WARRIOR", "PALADIN", "DEATHKNIGHT", "HUNTER", "SHAMAN", "EVOKER", "ROGUE", "MONK", "DRUID", "DEMONHUNTER", "PRIEST", "MAGE", "WARLOCK"})
 
+-- Specialization-level weapon/shield preferences.
+--
+-- These narrow the class-level tables above: the class-level tables answer
+-- "could this class ever equip this?", these answer "would this spec ever want it?".
+-- Every subclass listed here must also appear in that class' entry above,
+-- because the class-level check always runs first.
+local SpecsByClass = {}
+local SpecClass = {}
+local SpecWeaponSubclasses = {}
+local SpecUsesShield = {}
+local ClassFavoriteWeaponSubclasses = {}
+local ClassUsesShield = {}
+
+local function SetClassSpecs(class, specIDs)
+    SpecsByClass[class] = specIDs
+end
+
+local function SetSpecWeaponSubclasses(specID, subclassIDs)
+    if not specID then
+        return
+    end
+
+    local subclasses = {}
+    for _, subclassID in ipairs(subclassIDs) do
+        subclasses[subclassID] = true
+    end
+    SpecWeaponSubclasses[specID] = subclasses
+end
+
+local function SetSpecUsesShield(specID)
+    if not specID then
+        return
+    end
+
+    SpecUsesShield[specID] = true
+end
+
+-- Well-known, stable, locale-independent Blizzard specialization IDs.
+local Spec = {
+    Arms = 71, Fury = 72, ProtectionWarrior = 73,
+    HolyPaladin = 65, ProtectionPaladin = 66, Retribution = 70,
+    BeastMastery = 253, Marksmanship = 254, Survival = 255,
+    Assassination = 259, Outlaw = 260, Subtlety = 261,
+    Discipline = 256, HolyPriest = 257, Shadow = 258,
+    Blood = 250, FrostDeathKnight = 251, Unholy = 252,
+    Elemental = 262, Enhancement = 263, RestorationShaman = 264,
+    Arcane = 62, Fire = 63, FrostMage = 64,
+    Affliction = 265, Demonology = 266, Destruction = 267,
+    Brewmaster = 268, Windwalker = 269, Mistweaver = 270,
+    Balance = 102, Feral = 103, Guardian = 104, RestorationDruid = 105,
+    Havoc = 577, Vengeance = 581, Devourer = 1480,
+    Devastation = 1467, Preservation = 1468, Augmentation = 1473,
+}
+
+SetClassSpecs("WARRIOR",     {Spec.Arms, Spec.Fury, Spec.ProtectionWarrior})
+SetClassSpecs("PALADIN",     {Spec.HolyPaladin, Spec.ProtectionPaladin, Spec.Retribution})
+SetClassSpecs("HUNTER",      {Spec.BeastMastery, Spec.Marksmanship, Spec.Survival})
+SetClassSpecs("ROGUE",       {Spec.Assassination, Spec.Outlaw, Spec.Subtlety})
+SetClassSpecs("PRIEST",      {Spec.Discipline, Spec.HolyPriest, Spec.Shadow})
+SetClassSpecs("DEATHKNIGHT", {Spec.Blood, Spec.FrostDeathKnight, Spec.Unholy})
+SetClassSpecs("SHAMAN",      {Spec.Elemental, Spec.Enhancement, Spec.RestorationShaman})
+SetClassSpecs("MAGE",        {Spec.Arcane, Spec.Fire, Spec.FrostMage})
+SetClassSpecs("WARLOCK",     {Spec.Affliction, Spec.Demonology, Spec.Destruction})
+SetClassSpecs("MONK",        {Spec.Brewmaster, Spec.Windwalker, Spec.Mistweaver})
+SetClassSpecs("DRUID",       {Spec.Balance, Spec.Feral, Spec.Guardian, Spec.RestorationDruid})
+SetClassSpecs("DEMONHUNTER", {Spec.Havoc, Spec.Vengeance, Spec.Devourer})
+SetClassSpecs("EVOKER",      {Spec.Devastation, Spec.Preservation, Spec.Augmentation})
+
+-- Per-spec favored weapon subclasses / shield usage.
+--
+-- Source: Blizzard's own ChrSpecialization game-data table, Description_lang
+-- field ("Preferred Weapon(s): ..."), queried from the wago.tools DB2 export
+-- (https://wago.tools/db2/ChrSpecialization) on 2026-08-18 against live WoW
+-- patch 12.1 ("Midnight") data - including Devourer (id 1480), the new third
+-- Demon Hunter spec added in Midnight.
+--
+-- To refresh this table later, re-fetch that same export (or the equivalent
+-- DBC/DB2 dump from wowhead/wago after a future patch) and re-read each spec
+-- row's Description_lang "Preferred Weapon" clause - the mapping from that
+-- text to WeaponSubclass/ArmorSubclass constants is mechanical: "Two-Handed
+-- X" -> X2H, a bare weapon name -> its 1H constant, "Shield" ->
+-- ArmorSubclass.Shield, and inherently-2H types (Staff/Polearm/Bow/Gun/
+-- Crossbow/Warglaive) map directly since WeaponSubclass only carries one
+-- entry for each of those. Every entry below was cross-checked against the
+-- class-level WeaponSubclassClasses/ArmorSubclassClasses tables above so
+-- nothing here is ever unreachable.
+--
+-- A few entries deliberately go beyond the official text, flagged inline:
+-- Outlaw's Dagger (current guides mandate one in the off-hand for a spec
+-- mechanic) and Windwalker's Polearm/Staff (a balance change made
+-- two-handed weapons this season's top pick, ahead of the flavor text).
+
+-- Warrior - "Two-Handed Axe, Mace, Sword" / "Dual Two-Handed Axes, Maces, Swords" / "Axe, Mace, Sword, and Shield"
+SetSpecWeaponSubclasses(Spec.Arms,              {WeaponSubclass.Axe2H, WeaponSubclass.Mace2H, WeaponSubclass.Sword2H})
+SetSpecWeaponSubclasses(Spec.Fury,              {WeaponSubclass.Axe2H, WeaponSubclass.Mace2H, WeaponSubclass.Sword2H})
+SetSpecWeaponSubclasses(Spec.ProtectionWarrior, {WeaponSubclass.Axe, WeaponSubclass.Mace, WeaponSubclass.Sword})
+
+-- Paladin - "Sword, Mace, and Shield" / "Sword, Mace, Axe, and Shield" / "Two-Handed Sword, Mace, Axe"
+SetSpecWeaponSubclasses(Spec.HolyPaladin,       {WeaponSubclass.Sword, WeaponSubclass.Mace})
+SetSpecWeaponSubclasses(Spec.ProtectionPaladin, {WeaponSubclass.Sword, WeaponSubclass.Mace, WeaponSubclass.Axe})
+SetSpecWeaponSubclasses(Spec.Retribution,       {WeaponSubclass.Sword2H, WeaponSubclass.Mace2H, WeaponSubclass.Axe2H})
+
+-- Hunter - "Bow, Crossbow, Gun" (x2) / "Polearm, Staff, Axe, Dagger, Sword"
+SetSpecWeaponSubclasses(Spec.BeastMastery,      {WeaponSubclass.Bow, WeaponSubclass.Crossbow, WeaponSubclass.Gun})
+SetSpecWeaponSubclasses(Spec.Marksmanship,      {WeaponSubclass.Bow, WeaponSubclass.Crossbow, WeaponSubclass.Gun})
+SetSpecWeaponSubclasses(Spec.Survival,          {WeaponSubclass.Polearm, WeaponSubclass.Staff, WeaponSubclass.Axe, WeaponSubclass.Dagger, WeaponSubclass.Sword})
+
+-- Rogue - "Daggers" / "Axes, Maces, Swords, Fist Weapons" / "Daggers"
+SetSpecWeaponSubclasses(Spec.Assassination,     {WeaponSubclass.Dagger})
+SetSpecWeaponSubclasses(Spec.Outlaw,            {WeaponSubclass.Axe, WeaponSubclass.Mace, WeaponSubclass.Sword, WeaponSubclass.Fist, WeaponSubclass.Dagger})
+SetSpecWeaponSubclasses(Spec.Subtlety,          {WeaponSubclass.Dagger})
+
+-- Priest - "Staff, Wand, Dagger, Mace" (all 3 specs identical)
+SetSpecWeaponSubclasses(Spec.Discipline,        {WeaponSubclass.Staff, WeaponSubclass.Wand, WeaponSubclass.Dagger, WeaponSubclass.Mace})
+SetSpecWeaponSubclasses(Spec.HolyPriest,        {WeaponSubclass.Staff, WeaponSubclass.Wand, WeaponSubclass.Dagger, WeaponSubclass.Mace})
+SetSpecWeaponSubclasses(Spec.Shadow,            {WeaponSubclass.Staff, WeaponSubclass.Wand, WeaponSubclass.Dagger, WeaponSubclass.Mace})
+
+-- Death Knight - "Two-Handed Axe, Mace, Sword" / "Dual Axes, Maces, Swords" / "Two-Handed Axe, Mace, Sword"
+SetSpecWeaponSubclasses(Spec.Blood,             {WeaponSubclass.Axe2H, WeaponSubclass.Mace2H, WeaponSubclass.Sword2H})
+SetSpecWeaponSubclasses(Spec.FrostDeathKnight,  {WeaponSubclass.Axe, WeaponSubclass.Mace, WeaponSubclass.Sword})
+SetSpecWeaponSubclasses(Spec.Unholy,            {WeaponSubclass.Axe2H, WeaponSubclass.Mace2H, WeaponSubclass.Sword2H})
+
+-- Shaman - "Mace, Dagger, and Shield" / "Dual Axes, Maces, Fist Weapons" / "Mace, Dagger, and Shield"
+SetSpecWeaponSubclasses(Spec.Elemental,         {WeaponSubclass.Mace, WeaponSubclass.Dagger})
+SetSpecWeaponSubclasses(Spec.Enhancement,       {WeaponSubclass.Axe, WeaponSubclass.Mace, WeaponSubclass.Fist})
+SetSpecWeaponSubclasses(Spec.RestorationShaman, {WeaponSubclass.Mace, WeaponSubclass.Dagger})
+
+-- Mage - "Staff, Wand, Dagger, Sword" (all 3 specs identical)
+SetSpecWeaponSubclasses(Spec.Arcane,            {WeaponSubclass.Staff, WeaponSubclass.Wand, WeaponSubclass.Dagger, WeaponSubclass.Sword})
+SetSpecWeaponSubclasses(Spec.Fire,              {WeaponSubclass.Staff, WeaponSubclass.Wand, WeaponSubclass.Dagger, WeaponSubclass.Sword})
+SetSpecWeaponSubclasses(Spec.FrostMage,         {WeaponSubclass.Staff, WeaponSubclass.Wand, WeaponSubclass.Dagger, WeaponSubclass.Sword})
+
+-- Warlock - "Staff, Wand, Dagger, Sword" (all 3 specs identical)
+SetSpecWeaponSubclasses(Spec.Affliction,        {WeaponSubclass.Staff, WeaponSubclass.Wand, WeaponSubclass.Dagger, WeaponSubclass.Sword})
+SetSpecWeaponSubclasses(Spec.Demonology,        {WeaponSubclass.Staff, WeaponSubclass.Wand, WeaponSubclass.Dagger, WeaponSubclass.Sword})
+SetSpecWeaponSubclasses(Spec.Destruction,       {WeaponSubclass.Staff, WeaponSubclass.Wand, WeaponSubclass.Dagger, WeaponSubclass.Sword})
+
+-- Monk - "Staff, Polearm" / "Fist Weapons, Axes, Maces, Swords" / "Staff, Mace, Sword"
+SetSpecWeaponSubclasses(Spec.Brewmaster,        {WeaponSubclass.Staff, WeaponSubclass.Polearm})
+SetSpecWeaponSubclasses(Spec.Windwalker,        {WeaponSubclass.Fist, WeaponSubclass.Axe, WeaponSubclass.Mace, WeaponSubclass.Sword, WeaponSubclass.Polearm, WeaponSubclass.Staff})
+SetSpecWeaponSubclasses(Spec.Mistweaver,        {WeaponSubclass.Staff, WeaponSubclass.Mace, WeaponSubclass.Sword})
+
+-- Druid - "Staff, Dagger, Mace" / "Staff, Polearm" / "Staff, Polearm" / "Staff, Dagger, Mace"
+SetSpecWeaponSubclasses(Spec.Balance,           {WeaponSubclass.Staff, WeaponSubclass.Dagger, WeaponSubclass.Mace})
+SetSpecWeaponSubclasses(Spec.Feral,             {WeaponSubclass.Staff, WeaponSubclass.Polearm})
+SetSpecWeaponSubclasses(Spec.Guardian,          {WeaponSubclass.Staff, WeaponSubclass.Polearm})
+SetSpecWeaponSubclasses(Spec.RestorationDruid,  {WeaponSubclass.Staff, WeaponSubclass.Dagger, WeaponSubclass.Mace})
+
+-- Demon Hunter - "Warglaives, Swords, Axes, Fist Weapons" (x2) / "Warglaives, Swords, Axes, Fist Weapons, Daggers"
+SetSpecWeaponSubclasses(Spec.Havoc,             {WeaponSubclass.Warglaive, WeaponSubclass.Sword, WeaponSubclass.Axe, WeaponSubclass.Fist})
+SetSpecWeaponSubclasses(Spec.Vengeance,         {WeaponSubclass.Warglaive, WeaponSubclass.Sword, WeaponSubclass.Axe, WeaponSubclass.Fist})
+SetSpecWeaponSubclasses(Spec.Devourer,          {WeaponSubclass.Warglaive, WeaponSubclass.Sword, WeaponSubclass.Axe, WeaponSubclass.Fist, WeaponSubclass.Dagger})
+
+-- Evoker - "Staff, Sword, Dagger, Mace" (all 3 specs identical)
+SetSpecWeaponSubclasses(Spec.Devastation,       {WeaponSubclass.Staff, WeaponSubclass.Sword, WeaponSubclass.Dagger, WeaponSubclass.Mace})
+SetSpecWeaponSubclasses(Spec.Preservation,      {WeaponSubclass.Staff, WeaponSubclass.Sword, WeaponSubclass.Dagger, WeaponSubclass.Mace})
+SetSpecWeaponSubclasses(Spec.Augmentation,      {WeaponSubclass.Staff, WeaponSubclass.Sword, WeaponSubclass.Dagger, WeaponSubclass.Mace})
+
+SetSpecUsesShield(Spec.ProtectionWarrior)
+SetSpecUsesShield(Spec.HolyPaladin)
+SetSpecUsesShield(Spec.ProtectionPaladin)
+SetSpecUsesShield(Spec.Elemental)
+SetSpecUsesShield(Spec.RestorationShaman)
+
+-- Union of every spec's preferences, used when a character's spec is unknown.
+for class, specIDs in pairs(SpecsByClass) do
+    local weaponSubclasses = {}
+    local usesShield = false
+
+    for _, specID in ipairs(specIDs) do
+        SpecClass[specID] = class
+
+        for subclassID in pairs(SpecWeaponSubclasses[specID] or {}) do
+            weaponSubclasses[subclassID] = true
+        end
+
+        if SpecUsesShield[specID] then
+            usesShield = true
+        end
+    end
+
+    ClassFavoriteWeaponSubclasses[class] = weaponSubclasses
+    ClassUsesShield[class] = usesShield
+end
+
 ---@param link ItemInfo
 ---@return Enum.ItemBind bindType
 local function GetItemBind(link)
@@ -161,6 +346,81 @@ local function GetActualItemLevel(link)
     return level
 end
 
+local WarnedMissingSpecAPI = false
+local KnownSpecIDCache = {}
+local SpecUnknown = {}
+
+---Resolves the active specialization of a character, if known.
+---Requires the optional DataStore_Talents module and a character that has
+---been scanned at least once; returns `nil` otherwise, which callers must
+---treat as "spec unknown", never as "cannot use anything".
+---@param character string
+---@return number? specID
+local function GetKnownSpecID(character)
+    local cached = KnownSpecIDCache[character]
+    if cached == SpecUnknown then
+        return nil
+    elseif cached then
+        return cached
+    end
+
+    if not DataStore.GetActiveSpecInfo then
+        --@alpha@
+        if not WarnedMissingSpecAPI then
+            WarnedMissingSpecAPI = true
+            HandMeDowns:Print("warn: DataStore.GetActiveSpecInfo not available.")
+        end
+        --@end-alpha@
+        KnownSpecIDCache[character] = SpecUnknown
+        return nil
+    end
+
+    local success, _, specID = pcall(DataStore.GetActiveSpecInfo, DataStore, character)
+    if not success or not specID or specID == 0 then
+        KnownSpecIDCache[character] = SpecUnknown
+        return nil
+    end
+
+    KnownSpecIDCache[character] = specID
+    return specID
+end
+
+---Checks whether a weapon or shield is one the character's specialization
+---actually favors, falling back to the union over every spec of the
+---character's class when the spec is unknown. Armor other than shields is
+---never specialization-specific and always passes.
+---@param character string
+---@param class string
+---@param itemClassID number
+---@param itemSubclassID number
+---@return boolean
+local function IsItemSubclassFavoredBySpec(character, class, itemClassID, itemSubclassID)
+    if itemClassID == ItemClassWeapon and itemSubclassID == WeaponSubclass.FishingPole then
+        return true
+    end
+
+    local isWeapon = itemClassID == ItemClassWeapon
+    local isShield = itemClassID == ItemClassArmor and itemSubclassID == ArmorSubclass.Shield
+    if not isWeapon and not isShield then
+        return true
+    end
+
+    local specID = GetKnownSpecID(character)
+    if specID and SpecClass[specID] == class then
+        if isShield then
+            return SpecUsesShield[specID] == true
+        end
+        return SpecWeaponSubclasses[specID][itemSubclassID] == true
+    end
+
+    if isShield then
+        return ClassUsesShield[class] == true
+    end
+
+    local favorites = ClassFavoriteWeaponSubclasses[class]
+    return favorites ~= nil and favorites[itemSubclassID] == true
+end
+
 ---@param character string
 ---@param itemLink ItemInfo
 ---@return boolean
@@ -189,7 +449,11 @@ local function CanCharacterEquipItem(character, itemLink)
 
     local _, class = DataStore:GetCharacterClass(character)
 
-    return arrayContains(classesThatCanUseItem, class)
+    if not arrayContains(classesThatCanUseItem, class) then
+        return false
+    end
+
+    return IsItemSubclassFavoredBySpec(character, class, itemClassID, itemSubclassID)
 end
 
 local function GetItemEquipLocation(link)
@@ -395,6 +659,7 @@ function HandMeDowns:RegisterCacheInvalidationEvents()
         "PLAYER_AVG_ITEM_LEVEL_UPDATE",
         "PLAYER_EQUIPMENT_CHANGED",
         "PLAYER_LEVEL_UP",
+        "PLAYER_SPECIALIZATION_CHANGED",
         "PLAYERBANKSLOTS_CHANGED",
         "PLAYERREAGENTBANKSLOTS_CHANGED",
     }
@@ -406,6 +671,7 @@ end
 
 function HandMeDowns:ClearRecommendationCache()
     clearTable(TooltipRecommendationCache)
+    clearTable(KnownSpecIDCache)
 end
 
 function HandMeDowns:InvalidateRecommendationCache()

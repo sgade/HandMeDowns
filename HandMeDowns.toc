@@ -4,6 +4,7 @@
 ## Author: Kiaro-Frostwolf
 ## Version: @project-version@
 ## Dependencies: DataStore, DataStore_Characters, DataStore_Inventory, DataStore_Containers, DataStore_Mails
+## OptionalDeps: DataStore_Talents
 ## Category-enUS: Equipment
 ## Category-deDE: Ausrüstung
 ## Category-esES: Equipo
