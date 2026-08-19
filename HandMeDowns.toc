@@ -23,3 +23,8 @@
 embeds.xml
 
 HandMeDowns.lua
+Data.lua
+Characters.lua
+Pawn.lua
+Assignment.lua
+Tooltip.lua
