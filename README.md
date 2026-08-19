@@ -4,16 +4,24 @@
 
 Recommends alt characters for bind-on-equip and warbound gear.
 
-HandMeDowns uses DataStore to compare the hovered item against characters on the
-account. The current character is checked first. If the item is an upgrade and
-the character does not already have an equal-or-better item equipped, in bags,
-in the bank, or in the mailbox, the tooltip recommends keeping the item.
+HandMeDowns uses DataStore to compare the hovered item against every character
+on the account, current character included. Characters are ranked in priority
+order by current level first, then equipped average item level, and checked in
+that order; the first eligible character is the recommendation. A character is
+eligible when it can use the hovered item and does not already have an
+equal-or-better item for that equip location equipped, in bags, in the bank, or
+in the mailbox. If the current character comes first in that priority order,
+the tooltip recommends keeping the item; otherwise it recommends sending it to
+whichever character does.
 
-If the current character does not need the item, other characters are considered
-in priority order by current level first, then equipped average item level. A
-character is eligible when it can use the hovered item and does not already have
-an equal-or-better item for that equip location equipped, in bags, in the bank,
-or in the mailbox.
+When two comparable items share the exact same item level, the tie is broken by
+secondary stats: each character's spec has a recorded stat priority (e.g. Crit
+&gt; Haste &gt; Mastery &gt; Versatility), and whichever item carries more of the
+higher-priority stat wins. If the character's spec isn't known yet (no
+DataStore_Talents scan), or the spec has no recorded priority, item level is the
+only comparison and a tie means neither item is recommended over the other. See
+[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for where the weapon and stat
+preference data comes from and how to refresh it.
 
 Armor, shields, and weapons are checked against class-compatible item
 subclasses. One-handed weapons are compared against both main-hand and off-hand
