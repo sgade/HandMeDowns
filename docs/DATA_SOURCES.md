@@ -1,9 +1,11 @@
 # Data sources for spec preferences
 
-HandMeDowns hardcodes two kinds of per-spec preference data in
-`HandMeDowns.lua`: which weapon/shield subclasses a spec actually uses, and
-which secondary stats a spec prefers. Both drift with patches. This doc
-records where each came from and how to refresh it.
+HandMeDowns hardcodes one kind of per-spec preference data in
+`HandMeDowns.lua`: which weapon/shield subclasses a spec actually uses. It
+drifts with patches - this doc records where it came from and how to
+refresh it. Secondary stat preferences (Crit/Haste/Mastery/Versatility) are
+**not** hardcoded; that comparison is delegated to the optional Pawn addon
+when it's installed - see the second section below.
 
 ## Weapon and shield preferences (`SpecWeaponSubclasses`, `SpecUsesShield`)
 
@@ -37,61 +39,73 @@ flagged inline in the source comments above `SetSpecWeaponSubclasses` calls
 those still hold true each time this is refreshed; they can go stale
 independently of the DB2 data.
 
-## Secondary stat priorities (`SpecSecondaryStatPriority`)
+## Secondary stat priorities (delegated to Pawn, `CompareItemStatsForCharacter`)
 
-**Source**: Wowhead's per-spec "Stat Priority" guides, one page per
-spec+role:
+HandMeDowns used to hardcode a per-spec table of secondary stat priorities,
+hand-transcribed from Wowhead's guides. That table is gone. Secondary-stat
+tie-breaking is instead delegated live to the optional
+[Pawn](https://github.com/VgerMods/Pawn) addon, if the player has it
+installed - Pawn's entire purpose is scoring items against per-spec stat
+weights, so HandMeDowns just asks it rather than maintaining its own,
+inherently-theorycrafted copy of the same data.
 
-```
-https://www.wowhead.com/guide/classes/<class-slug>/<spec-slug>/stat-priority-pve-<role>
-```
+**Why this is possible**: Pawn exposes genuine global Lua functions other
+addons can call - this isn't reverse-engineering. Pawn's own
+ArkInventory-rule integration (`GetPawnStatusForArkInventoryRule` in
+`Pawn.lua`) calls the exact same functions HandMeDowns uses, confirming
+they're meant for cross-addon use. Verified by reading Pawn's actual source
+(not a summarized/fetched version - see the "verification method" note
+below) at `github.com/VgerMods/Pawn`, `master` branch, **Pawn version
+2.13.16**, same `## Interface: 120100` as HandMeDowns, on 2026-08-19.
 
-where `<role>` is `dps`, `tank`, or `healer`. Last fetched 2026-08-19,
-current for WoW patch 12.1 ("Midnight").
+**Functions relied on** (all in `Pawn.lua`):
+- `PawnGetItemData(itemLink)` - parses an item link into a table with
+  `.Stats`, `.Level`, `.SocketBonusStats`. Link-based, so it works for any
+  item link regardless of which character owns it, same as the WoW APIs
+  HandMeDowns already calls directly (`C_Item.GetItemInfo` etc.).
+- `PawnFindScaleForSpec(classID, specID)` - returns the name of a
+  plugin-provided scale for a class+spec, or `nil`. **`classID` is
+  Blizzard's numeric class ID (1-13)**; **`specID` here is the local 1-4
+  spec index** (`GetSpecializationInfoForClassID`'s convention - confirmed
+  against `ScaleTemplates.lua`'s own template entries, e.g. Druid Feral is
+  listed as `ClassID 11, SpecID 2`), **not** the global spec ID DataStore
+  and the rest of HandMeDowns use. `GetPawnLocalSpecIndex` in
+  `HandMeDowns.lua` converts between the two using the existing
+  `SpecsByClass` ordering, which already matches this convention.
+- `PawnGetSingleValueFromItem(item, scaleName)` - returns a single numeric
+  score for that item against that scale (gems, sockets, and normalization
+  handled internally by Pawn).
 
-Unlike the weapon table, **this is theorycrafting, not Blizzard data** -
-there is no DB2/API source for "which secondary stat a spec wants more."
-Wowhead's guides are written from simulation results and top-player
-consensus, and explicitly caveat that breakpoints, diminishing returns,
-talents, and gear state all shift the real answer - a fresh sim of your own
-character always beats a static list. Treat this table as a reasonable
-default for tie-breaking, not ground truth.
+**Why a scale is always available**: `Pawn.toc` loads `AskMrRobot.lua`
+unconditionally on retail (`[AllowLoadGameType mainline]`, not an optional
+module or user-imported string). That file registers a `"MrRobot"`-provider
+scale for every class+spec combination at login, so `PawnFindScaleForSpec`
+resolves for any alt's class/spec the moment Pawn is installed, with no
+per-user setup.
 
-**Method note**: fetching these URLs directly (plain HTTP GET, or a generic
-web-fetch tool) tends to return only Wowhead's client-rendered navigation
-chrome, not the actual guide text - the page content loads via JavaScript.
-What worked during research was a **targeted web search** per spec, e.g.:
+**This is not a documented or versioned API contract.** Every call in
+`HandMeDowns.lua`'s Pawn-integration section (`GetPawnScaleNameForCharacter`,
+`GetPawnItemValue`) is defensive on purpose: it checks `type(...) ==
+"function"` before calling anything, wraps every call in `pcall`, and
+validates the type of whatever comes back before trusting it. Any failure
+at any step - Pawn not installed, a renamed/removed function, an unexpected
+return shape, an internal Pawn error - degrades silently to "no opinion",
+identical to today's "spec unknown" fallback (item level is the only
+comparison, and an exact tie means neither item is recommended over the
+other). Nothing here should ever be able to produce a visible error for a
+player who simply doesn't have Pawn installed.
 
-```
-"Frost Mage" stat priority wowhead Crit Haste Mastery Versatility
-```
+**Verification method note, for future reference**: a generic
+fetch-and-summarize web tool *hallucinated* plausible-looking function
+bodies for `Pawn.lua`/`Core.lua` that don't exist in the real files -this
+was only caught by downloading the raw source directly (`curl` the
+`raw.githubusercontent.com` URLs) and reading it. Don't trust a summarized
+read of a large Lua file when re-verifying this integration; fetch and read
+the actual source.
 
-The search engine's synthesized answer/snippet reliably surfaced the actual
-priority line, e.g. for Frost Mage: `Crit ≈ Mastery > Haste > Versatility`,
-plus the caveat text. If a query doesn't surface a clear priority line, try
-adding "PvE", "single target", "raid", or the exact Wowhead URL to the
-query before giving up on that spec.
-
-**Transcription rule**: record the priority *exactly* as published,
-preserving groupings:
-- `>` between stats means strictly ranked - left is preferred over right.
-- `≈` (or "~", "roughly equal", "within a few % of each other" in the
-  guide text) means those stats are one **tier** - list them together in
-  the same inner array in `SpecSecondaryStatPriority`, not as separate
-  tiers. Do not collapse a `≈` group down to a single "pick one" stat.
-
-Each spec's entry in `SpecSecondaryStatPriority` is an ordered array of
-tiers (arrays of `SecondaryStat` keys). Comparison sums the tier's stat
-amounts on each item and moves to the next tier only on an exact sum tie -
-see `CompareItemStatsForCharacter` in `HandMeDowns.lua`.
-
-There is deliberately no class-level fallback for stat priority (unlike the
-weapon table's `ClassFavoriteWeaponSubclasses` union): stat order genuinely
-differs by spec within the same class, so unioning would produce a
-meaningless order. When a character's spec isn't known yet, or a spec has
-no recorded priority, the tie-break is skipped entirely and the comparison
-falls back to item level only.
-
-**To refresh**: re-run the search-per-spec method above for all specs
-(~39, one per spec+role) after a future patch or major balance pass, and
-re-transcribe each spec's tiers.
+**To refresh**: if a future Pawn update renames or reshapes these functions
+and HandMeDowns' Pawn integration silently stops contributing tie-breaks
+(it will not error - see above), re-fetch Pawn's current source the same
+way and re-check `PawnFindScaleForSpec`, `PawnGetItemData`, and
+`PawnGetSingleValueFromItem` still exist with the same parameter order and
+return shape.

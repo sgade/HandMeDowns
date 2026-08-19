@@ -313,126 +313,14 @@ for class, specIDs in pairs(SpecsByClass) do
     ClassUsesShield[class] = usesShield
 end
 
--- Per-spec secondary stat tiers, used only to break an exact item-level tie
--- between two otherwise-comparable items (see CompareItemsForCharacter).
---
--- Source: Wowhead's per-spec "Stat Priority" guides, one page per spec+role
--- (https://www.wowhead.com/guide/classes/<class>/<spec>/stat-priority-pve-<role>,
--- role is dps/tank/healer), current for WoW patch 12.1 ("Midnight"), fetched
--- 2026-08-19. Unlike the weapon table above, this is theorycrafting, not
--- Blizzard data - it has no stable DB2 source and is expected to drift with
--- gear, talents, and tier balance changes. Treat it as a rough default, not
--- a guarantee.
---
--- Each entry is an ordered list of tiers; a tier is a list of stats the
--- guide treats as roughly interchangeable (joined with "~" or "≈" on the
--- page, or "within a few % of each other" in the text). Tiers are compared
--- in order - the first tier where the summed stat amounts differ decides -
--- so record the tiering exactly as published rather than picking one stat
--- per tier. Every entry uses the SecondaryStat keys defined above.
---
--- There is deliberately no class-level union fallback here (unlike weapons):
--- stat order genuinely differs by spec within a class, so when a character's
--- spec is unknown (GetKnownSpecID returns nil), the tie-break is skipped
--- entirely rather than guessing - see CompareItemStatsForCharacter.
---
--- To refresh this table after a future patch, re-run the same lookup per
--- spec+role and re-transcribe the tiers; see docs/DATA_SOURCES.md for the
--- exact method (a direct page fetch only returns Wowhead's client-rendered
--- nav chrome - a targeted web search per spec surfaces the actual priority
--- line in the result snippet instead).
-local SecondaryStat = {
-    Crit = "ITEM_MOD_CRIT_RATING_SHORT",
-    Haste = "ITEM_MOD_HASTE_RATING_SHORT",
-    Mastery = "ITEM_MOD_MASTERY_RATING_SHORT",
-    Versatility = "ITEM_MOD_VERSATILITY",
+-- Numeric class IDs, Blizzard-stable, used only to talk to Pawn (see
+-- GetPawnScaleNameForCharacter below) - Pawn's scale-lookup functions take
+-- these instead of the classFile strings DataStore uses.
+local ClassID = {
+    WARRIOR = 1, PALADIN = 2, HUNTER = 3, ROGUE = 4, PRIEST = 5,
+    DEATHKNIGHT = 6, SHAMAN = 7, MAGE = 8, WARLOCK = 9, MONK = 10,
+    DRUID = 11, DEMONHUNTER = 12, EVOKER = 13,
 }
-
-local SpecSecondaryStatPriority = {}
-
-local function SetSpecSecondaryStatPriority(specID, tiers)
-    if not specID then
-        return
-    end
-
-    SpecSecondaryStatPriority[specID] = tiers
-end
-
-local Crit, Haste, Mastery, Vers = SecondaryStat.Crit, SecondaryStat.Haste, SecondaryStat.Mastery, SecondaryStat.Versatility
-
--- Every entry below is transcribed from Wowhead's stat-priority guide for
--- that spec+role (see the source comment above and docs/DATA_SOURCES.md).
--- Every guide repeats some version of "these are close, sim your own
--- character" - this table is a directional default, not a breakpoint-exact
--- answer. Inline notes below flag specs where sources disagreed more than
--- usual, or where the order is meaningfully different between raid and
--- Mythic+/multi-target play (a static list can only encode one of those).
-
--- Warrior
-SetSpecSecondaryStatPriority(Spec.Arms,              {{Crit, Haste}, {Mastery, Vers}})
-SetSpecSecondaryStatPriority(Spec.Fury,              {{Mastery, Haste}, {Vers}, {Crit}})
-SetSpecSecondaryStatPriority(Spec.ProtectionWarrior, {{Haste}, {Crit, Vers}, {Mastery}})
-
--- Paladin
-SetSpecSecondaryStatPriority(Spec.HolyPaladin,       {{Mastery}, {Crit, Haste}, {Vers}})
-SetSpecSecondaryStatPriority(Spec.ProtectionPaladin, {{Haste}, {Mastery, Crit}, {Vers}})
-SetSpecSecondaryStatPriority(Spec.Retribution,       {{Mastery}, {Haste}, {Crit}, {Vers}})
-
--- Hunter
-SetSpecSecondaryStatPriority(Spec.BeastMastery,      {{Mastery}, {Haste}, {Crit}, {Vers}}) -- raid/single-target; Crit overtakes Haste once 2+ targets are relevant
-SetSpecSecondaryStatPriority(Spec.Marksmanship,      {{Crit}, {Mastery}, {Vers}, {Haste}})
-SetSpecSecondaryStatPriority(Spec.Survival,          {{Mastery}, {Crit}, {Haste}, {Vers}})
-
--- Rogue
-SetSpecSecondaryStatPriority(Spec.Assassination,     {{Haste, Crit}, {Mastery}, {Vers}})
-SetSpecSecondaryStatPriority(Spec.Outlaw,            {{Haste}, {Crit}, {Vers}, {Mastery}})
-SetSpecSecondaryStatPriority(Spec.Subtlety,          {{Haste}, {Mastery}, {Vers}, {Crit}}) -- low confidence: sources disagreed substantially on this one
-
--- Priest
-SetSpecSecondaryStatPriority(Spec.Discipline,        {{Haste}, {Crit}, {Mastery}, {Vers}}) -- build-dependent: Voidweaver wants more Haste than Oracle
-SetSpecSecondaryStatPriority(Spec.HolyPriest,        {{Crit}, {Haste, Mastery, Vers}})
-SetSpecSecondaryStatPriority(Spec.Shadow,            {{Haste, Mastery}, {Crit, Vers}}) -- hero-talent dependent: Voidweaver favors Haste over Mastery, Archon keeps them closer
-
--- Death Knight
-SetSpecSecondaryStatPriority(Spec.Blood,             {{Crit}, {Vers}, {Mastery}, {Haste}}) -- hero-talent dependent: San'layn wants meaningfully more Haste, Deathbringer favors Crit
-SetSpecSecondaryStatPriority(Spec.FrostDeathKnight,  {{Crit}, {Mastery, Haste}, {Vers}})
-SetSpecSecondaryStatPriority(Spec.Unholy,            {{Mastery, Crit}, {Haste}, {Vers}})
-
--- Shaman
-SetSpecSecondaryStatPriority(Spec.Elemental,         {{Crit}, {Haste}, {Vers}, {Mastery}}) -- low confidence: sources vary widely on this one, sim your own character
-SetSpecSecondaryStatPriority(Spec.Enhancement,       {{Mastery, Haste}, {Crit, Vers}})
-SetSpecSecondaryStatPriority(Spec.RestorationShaman, {{Crit}, {Haste}, {Mastery, Vers}})
-
--- Mage
-SetSpecSecondaryStatPriority(Spec.Arcane,            {{Haste, Crit, Vers}, {Mastery}})
-SetSpecSecondaryStatPriority(Spec.Fire,              {{Haste}, {Mastery}, {Vers}, {Crit}})
-SetSpecSecondaryStatPriority(Spec.FrostMage,         {{Mastery, Haste, Crit}, {Vers}})
-
--- Warlock
-SetSpecSecondaryStatPriority(Spec.Affliction,        {{Haste}, {Crit}, {Mastery}, {Vers}})
-SetSpecSecondaryStatPriority(Spec.Demonology,        {{Crit}, {Haste}, {Mastery}, {Vers}})
-SetSpecSecondaryStatPriority(Spec.Destruction,       {{Haste}, {Crit, Mastery}, {Vers}})
-
--- Monk
-SetSpecSecondaryStatPriority(Spec.Brewmaster,        {{Crit, Vers}, {Mastery}, {Haste}})
-SetSpecSecondaryStatPriority(Spec.Windwalker,        {{Haste}, {Mastery, Crit}, {Vers}})
-SetSpecSecondaryStatPriority(Spec.Mistweaver,        {{Haste}, {Crit}, {Vers, Mastery}})
-
--- Druid
-SetSpecSecondaryStatPriority(Spec.Balance,           {{Mastery}, {Haste, Crit}, {Vers}})
-SetSpecSecondaryStatPriority(Spec.Feral,             {{Mastery, Crit, Haste}, {Vers}})
-SetSpecSecondaryStatPriority(Spec.Guardian,          {{Haste}, {Vers}, {Mastery}, {Crit}})
-SetSpecSecondaryStatPriority(Spec.RestorationDruid,  {{Haste}, {Mastery}, {Vers}, {Crit}})
-
--- Demon Hunter
-SetSpecSecondaryStatPriority(Spec.Havoc,             {{Crit, Mastery}, {Haste}, {Vers}}) -- hero-talent dependent: Fel-Scarred leans Mastery, Aldrachi Reaver leans Crit
-SetSpecSecondaryStatPriority(Spec.Vengeance,         {{Crit}, {Vers, Mastery}, {Haste}})
-SetSpecSecondaryStatPriority(Spec.Devourer,          {{Mastery}, {Haste}, {Crit}, {Vers}}) -- raid; Mythic+ instead runs Haste > Mastery > Crit > Vers
-
--- Evoker
-SetSpecSecondaryStatPriority(Spec.Devastation,       {{Crit}, {Haste}, {Mastery}, {Vers}}) -- low confidence: raw sim weights put all four within a few points of each other
-SetSpecSecondaryStatPriority(Spec.Preservation,      {{Mastery}, {Crit, Haste}, {Vers}}) -- raid; Mythic+ instead runs Haste > Mastery > Crit > Vers
-SetSpecSecondaryStatPriority(Spec.Augmentation,      {{Crit}, {Haste}, {Mastery}, {Vers}})
 
 ---@param link ItemInfo
 ---@return Enum.ItemBind bindType
@@ -508,53 +396,133 @@ local function GetKnownSpecID(character)
     return specID
 end
 
----Reads an item's secondary stat amounts, defaulting anything not present
----on the item to 0.
----@param link ItemInfo
----@return table<string, number>
-local function GetItemSecondaryStatAmounts(link)
-    local amounts = {}
-    local stats = link and C_Item.GetItemStats(link)
+-- *** Secondary stat tie-breaking via Pawn (optional dependency)
+--
+-- HandMeDowns does not maintain its own secondary stat priorities. Instead,
+-- when the Pawn addon (https://github.com/VgerMods/Pawn) is installed, its
+-- own item-scoring calculation is used to break an exact item-level tie
+-- between two comparable items. Pawn is not a required dependency, and its
+-- functions are not a documented/versioned API - every call below is
+-- defensive (existence and type checks, pcall) and degrades silently to
+-- "no opinion" (the same fallback as an unknown spec) if Pawn isn't
+-- installed, is a different version than expected, or errors internally.
+-- See docs/DATA_SOURCES.md for exactly which Pawn functions this relies on,
+-- the Pawn version it was verified against, and how to re-verify them.
 
-    for _, statKey in pairs(SecondaryStat) do
-        amounts[statKey] = (stats and stats[statKey]) or 0
+local PawnScaleNameCache = {}
+local PawnScaleUnknown = {}
+
+---Finds the local (1-4) spec index Pawn expects, matching Blizzard's
+---GetSpecializationInfoForClassID convention. SpecsByClass is already
+---ordered to match that convention (see SetClassSpecs above).
+---@param class string
+---@param specID number
+---@return number?
+local function GetPawnLocalSpecIndex(class, specID)
+    local specIDs = SpecsByClass[class]
+    if not specIDs then
+        return nil
     end
 
-    return amounts
+    for index, thisSpecID in ipairs(specIDs) do
+        if thisSpecID == specID then
+            return index
+        end
+    end
+
+    return nil
 end
 
----Compares two items purely on secondary stats, using the character's
----spec-favored stat tiers. Only meaningful as a tie-break once item level
----is already known to be equal - see CompareItemsForCharacter.
+---Resolves the name of the Pawn scale to use for a character, if Pawn is
+---installed and a scale can be determined. Never throws; returns nil for
+---any reason Pawn's data isn't usable (not installed, spec unknown, a
+---renamed/missing function, or an error inside Pawn itself).
+---@param character string
+---@return string?
+local function GetPawnScaleNameForCharacter(character)
+    local cached = PawnScaleNameCache[character]
+    if cached == PawnScaleUnknown then
+        return nil
+    elseif cached then
+        return cached
+    end
+
+    local result = (function()
+        if type(PawnFindScaleForSpec) ~= "function" then
+            return nil
+        end
+
+        local _, class = DataStore:GetCharacterClass(character)
+        local classID = class and ClassID[class]
+        local specID = GetKnownSpecID(character)
+        if not classID or not specID then
+            return nil
+        end
+
+        local localSpecIndex = GetPawnLocalSpecIndex(class, specID)
+        if not localSpecIndex then
+            return nil
+        end
+
+        local ok, scaleName = pcall(PawnFindScaleForSpec, classID, localSpecIndex)
+        if not ok or type(scaleName) ~= "string" then
+            return nil
+        end
+
+        return scaleName
+    end)()
+
+    PawnScaleNameCache[character] = result or PawnScaleUnknown
+    return result
+end
+
+---Scores an item against a named Pawn scale, using Pawn's own item parsing
+---and valuation. Never throws; returns nil for any reason a value couldn't
+---be produced.
+---@param itemLink ItemInfo
+---@param scaleName string
+---@return number?
+local function GetPawnItemValue(itemLink, scaleName)
+    if not itemLink or type(PawnGetItemData) ~= "function" or type(PawnGetSingleValueFromItem) ~= "function" then
+        return nil
+    end
+
+    local ok, item = pcall(PawnGetItemData, itemLink)
+    if not ok or type(item) ~= "table" then
+        return nil
+    end
+
+    local ok2, value = pcall(PawnGetSingleValueFromItem, item, scaleName)
+    if not ok2 or type(value) ~= "number" then
+        return nil
+    end
+
+    return value
+end
+
+---Compares two items purely on secondary stats, by asking Pawn to score
+---both against the character's spec scale. Only meaningful as a tie-break
+---once item level is already known to be equal - see
+---CompareItemsForCharacter.
 ---@param character string
 ---@param itemLinkA ItemInfo
 ---@param itemLinkB ItemInfo
 ---@return integer # 1 if A is preferred, -1 if B is preferred, 0 if tied or unknown
 local function CompareItemStatsForCharacter(character, itemLinkA, itemLinkB)
-    local specID = GetKnownSpecID(character)
-    local tiers = specID and SpecSecondaryStatPriority[specID]
-    if not tiers then
-        -- Spec unknown, or this spec has no recorded stat priority: no
-        -- opinion, leave the tie as-is rather than guessing.
+    local scaleName = GetPawnScaleNameForCharacter(character)
+    if not scaleName then
+        -- Pawn isn't installed/usable, or the spec is unknown: no opinion,
+        -- leave the tie as-is rather than guessing.
         return 0
     end
 
-    local amountsA = GetItemSecondaryStatAmounts(itemLinkA)
-    local amountsB = GetItemSecondaryStatAmounts(itemLinkB)
-
-    for _, tier in ipairs(tiers) do
-        local sumA, sumB = 0, 0
-        for _, statKey in ipairs(tier) do
-            sumA = sumA + amountsA[statKey]
-            sumB = sumB + amountsB[statKey]
-        end
-
-        if sumA ~= sumB then
-            return sumA > sumB and 1 or -1
-        end
+    local valueA = GetPawnItemValue(itemLinkA, scaleName)
+    local valueB = GetPawnItemValue(itemLinkB, scaleName)
+    if not valueA or not valueB or valueA == valueB then
+        return 0
     end
 
-    return 0
+    return valueA > valueB and 1 or -1
 end
 
 ---Compares two items of the same equip location for a character: item
@@ -863,6 +831,7 @@ end
 function HandMeDowns:ClearRecommendationCache()
     clearTable(TooltipRecommendationCache)
     clearTable(KnownSpecIDCache)
+    clearTable(PawnScaleNameCache)
 end
 
 function HandMeDowns:InvalidateRecommendationCache()

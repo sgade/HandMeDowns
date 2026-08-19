@@ -15,13 +15,14 @@ the tooltip recommends keeping the item; otherwise it recommends sending it to
 whichever character does.
 
 When two comparable items share the exact same item level, the tie is broken by
-secondary stats: each character's spec has a recorded stat priority (e.g. Crit
-&gt; Haste &gt; Mastery &gt; Versatility), and whichever item carries more of the
-higher-priority stat wins. If the character's spec isn't known yet (no
-DataStore_Talents scan), or the spec has no recorded priority, item level is the
-only comparison and a tie means neither item is recommended over the other. See
-[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for where the weapon and stat
-preference data comes from and how to refresh it.
+secondary stats - but only if the optional [Pawn](https://github.com/VgerMods/Pawn)
+addon is installed. HandMeDowns doesn't keep its own stat preference data; it
+asks Pawn to score both items against the character's spec and recommends
+whichever one Pawn values higher. Without Pawn installed, or if the character's
+spec isn't known yet (no DataStore_Talents scan), item level is the only
+comparison and a tie means neither item is recommended over the other. See
+[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for where the weapon preference
+data comes from, how the Pawn integration works, and how to refresh both.
 
 Armor, shields, and weapons are checked against class-compatible item
 subclasses. One-handed weapons are compared against both main-hand and off-hand
@@ -48,3 +49,4 @@ data.
 ## Optional dependencies
 
 - DataStore_Talents
+- Pawn
