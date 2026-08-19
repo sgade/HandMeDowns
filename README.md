@@ -4,15 +4,30 @@
 
 Recommends alt characters for bind-on-equip and warbound gear.
 
-HandMeDowns uses DataStore to compare the hovered item against every character
-on the account, current character included. Characters are ranked in priority
-order by current level first, then equipped average item level, and checked in
-that order; the first eligible character is the recommendation. A character is
-eligible when it can use the hovered item and does not already have an
-equal-or-better item for that equip location equipped, in bags, in the bank, or
-in the mailbox. If the current character comes first in that priority order,
-the tooltip recommends keeping the item; otherwise it recommends sending it to
-whichever character does.
+HandMeDowns uses DataStore to precompute, for the whole account, which
+character should end up with which warbound item - not just the one under
+your mouse. Every character's equipped gear, bags, bank, and mailbox are
+scanned together, so a spare sitting unlooked-at in one alt's bag can cascade
+down to a lower-priority alt instead of being invisible to the recommendation.
+Characters are ranked in priority order by current level first, then equipped
+average item level, and walked in that order for each equipment slot; each
+eligible character gets the better of their own current gear and the best
+still-unclaimed candidate for that slot. If the current character ends up
+with the hovered item, the tooltip recommends keeping it; if a different
+character does, it recommends sending it there; if nobody in the warband ends
+up wanting it, it recommends selling it. Currently equipped gear is never
+itself reassigned to another character - only bag/bank/mail spares are
+eligible to move.
+
+This precomputed result is cached and only redone when something that could
+change it actually happens (see caching, below); worst case, it's brought up
+to date the moment you hover a warbound item, so the tooltip is always
+correct even if nothing warmed the cache first.
+
+The warband priority order (level, then average item level) is decided by a
+single, swappable comparator function, so a different ordering (e.g. a manual
+per-character order) can be dropped in later without touching anything that
+consumes it.
 
 When two comparable items share the exact same item level, the tie is broken by
 secondary stats - but only if the optional [Pawn](https://github.com/VgerMods/Pawn)
@@ -33,10 +48,15 @@ recommendation.
 Required item level is intentionally not checked, so gear can be sent to an alt
 for later leveling.
 
-Recommendation results are cached by item link and cleared when local bag, bank,
-mail, equipment, level, or item-info data changes. Cache invalidation is repeated
-briefly after those events so DataStore has time to finish scanning the changed
-data.
+The full warband assignment is cached and marked stale (not eagerly
+recomputed) when local bag, bank, mail, equipment, level, or item-info data
+changes - recomputing right after looting, possibly mid-combat, is a worse
+time than the moment you actually look at a tooltip. A background recompute
+is attempted shortly after those events settle, but only while out of combat;
+either way, the next tooltip hover always brings the result up to date
+itself, so correctness never depends on the background attempt running.
+Invalidation is repeated briefly after those events so DataStore has time to
+finish scanning the changed data.
 
 ## Dependencies
 

@@ -1,7 +1,7 @@
 # Data sources for spec preferences
 
 HandMeDowns hardcodes one kind of per-spec preference data in
-`HandMeDowns.lua`: which weapon/shield subclasses a spec actually uses. It
+`Data.lua`: which weapon/shield subclasses a spec actually uses. It
 drifts with patches - this doc records where it came from and how to
 refresh it. Secondary stat preferences (Crit/Haste/Mastery/Versatility) are
 **not** hardcoded; that comparison is delegated to the optional Pawn addon
@@ -70,7 +70,7 @@ below) at `github.com/VgerMods/Pawn`, `master` branch, **Pawn version
   against `ScaleTemplates.lua`'s own template entries, e.g. Druid Feral is
   listed as `ClassID 11, SpecID 2`), **not** the global spec ID DataStore
   and the rest of HandMeDowns use. `GetPawnLocalSpecIndex` in
-  `HandMeDowns.lua` converts between the two using the existing
+  `Pawn.lua` converts between the two using `Data.lua`'s existing
   `SpecsByClass` ordering, which already matches this convention.
 - `PawnGetSingleValueFromItem(item, scaleName)` - returns a single numeric
   score for that item against that scale (gems, sockets, and normalization
@@ -84,7 +84,7 @@ resolves for any alt's class/spec the moment Pawn is installed, with no
 per-user setup.
 
 **This is not a documented or versioned API contract.** Every call in
-`HandMeDowns.lua`'s Pawn-integration section (`GetPawnScaleNameForCharacter`,
+`Pawn.lua` (`GetPawnScaleNameForCharacter`,
 `GetPawnItemValue`) is defensive on purpose: it checks `type(...) ==
 "function"` before calling anything, wraps every call in `pcall`, and
 validates the type of whatever comes back before trusting it. Any failure
