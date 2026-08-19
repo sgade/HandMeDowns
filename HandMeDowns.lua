@@ -217,6 +217,8 @@ SetClassSpecs("EVOKER",      {Spec.Devastation, Spec.Preservation, Spec.Augmenta
 -- Outlaw's Dagger (current guides mandate one in the off-hand for a spec
 -- mechanic) and Windwalker's Polearm/Staff (a balance change made
 -- two-handed weapons this season's top pick, ahead of the flavor text).
+--
+-- See docs/DATA_SOURCES.md for the full refresh method.
 
 -- Warrior - "Two-Handed Axe, Mace, Sword" / "Dual Two-Handed Axes, Maces, Swords" / "Axe, Mace, Sword, and Shield"
 SetSpecWeaponSubclasses(Spec.Arms,              {WeaponSubclass.Axe2H, WeaponSubclass.Mace2H, WeaponSubclass.Sword2H})
@@ -311,6 +313,15 @@ for class, specIDs in pairs(SpecsByClass) do
     ClassUsesShield[class] = usesShield
 end
 
+-- Numeric class IDs, Blizzard-stable, used only to talk to Pawn (see
+-- GetPawnScaleNameForCharacter below) - Pawn's scale-lookup functions take
+-- these instead of the classFile strings DataStore uses.
+local ClassID = {
+    WARRIOR = 1, PALADIN = 2, HUNTER = 3, ROGUE = 4, PRIEST = 5,
+    DEATHKNIGHT = 6, SHAMAN = 7, MAGE = 8, WARLOCK = 9, MONK = 10,
+    DRUID = 11, DEMONHUNTER = 12, EVOKER = 13,
+}
+
 ---@param link ItemInfo
 ---@return Enum.ItemBind bindType
 local function GetItemBind(link)
@@ -383,6 +394,154 @@ local function GetKnownSpecID(character)
 
     KnownSpecIDCache[character] = specID
     return specID
+end
+
+-- *** Secondary stat tie-breaking via Pawn (optional dependency)
+--
+-- HandMeDowns does not maintain its own secondary stat priorities. Instead,
+-- when the Pawn addon (https://github.com/VgerMods/Pawn) is installed, its
+-- own item-scoring calculation is used to break an exact item-level tie
+-- between two comparable items. Pawn is not a required dependency, and its
+-- functions are not a documented/versioned API - every call below is
+-- defensive (existence and type checks, pcall) and degrades silently to
+-- "no opinion" (the same fallback as an unknown spec) if Pawn isn't
+-- installed, is a different version than expected, or errors internally.
+-- See docs/DATA_SOURCES.md for exactly which Pawn functions this relies on,
+-- the Pawn version it was verified against, and how to re-verify them.
+
+local PawnScaleNameCache = {}
+local PawnScaleUnknown = {}
+
+---Finds the local (1-4) spec index Pawn expects, matching Blizzard's
+---GetSpecializationInfoForClassID convention. SpecsByClass is already
+---ordered to match that convention (see SetClassSpecs above).
+---@param class string
+---@param specID number
+---@return number?
+local function GetPawnLocalSpecIndex(class, specID)
+    local specIDs = SpecsByClass[class]
+    if not specIDs then
+        return nil
+    end
+
+    for index, thisSpecID in ipairs(specIDs) do
+        if thisSpecID == specID then
+            return index
+        end
+    end
+
+    return nil
+end
+
+---Resolves the name of the Pawn scale to use for a character, if Pawn is
+---installed and a scale can be determined. Never throws; returns nil for
+---any reason Pawn's data isn't usable (not installed, spec unknown, a
+---renamed/missing function, or an error inside Pawn itself).
+---@param character string
+---@return string?
+local function GetPawnScaleNameForCharacter(character)
+    local cached = PawnScaleNameCache[character]
+    if cached == PawnScaleUnknown then
+        return nil
+    elseif cached then
+        return cached
+    end
+
+    local result = (function()
+        if type(PawnFindScaleForSpec) ~= "function" then
+            return nil
+        end
+
+        local _, class = DataStore:GetCharacterClass(character)
+        local classID = class and ClassID[class]
+        local specID = GetKnownSpecID(character)
+        if not classID or not specID then
+            return nil
+        end
+
+        local localSpecIndex = GetPawnLocalSpecIndex(class, specID)
+        if not localSpecIndex then
+            return nil
+        end
+
+        local ok, scaleName = pcall(PawnFindScaleForSpec, classID, localSpecIndex)
+        if not ok or type(scaleName) ~= "string" then
+            return nil
+        end
+
+        return scaleName
+    end)()
+
+    PawnScaleNameCache[character] = result or PawnScaleUnknown
+    return result
+end
+
+---Scores an item against a named Pawn scale, using Pawn's own item parsing
+---and valuation. Never throws; returns nil for any reason a value couldn't
+---be produced.
+---@param itemLink ItemInfo
+---@param scaleName string
+---@return number?
+local function GetPawnItemValue(itemLink, scaleName)
+    if not itemLink or type(PawnGetItemData) ~= "function" or type(PawnGetSingleValueFromItem) ~= "function" then
+        return nil
+    end
+
+    local ok, item = pcall(PawnGetItemData, itemLink)
+    if not ok or type(item) ~= "table" then
+        return nil
+    end
+
+    local ok2, value = pcall(PawnGetSingleValueFromItem, item, scaleName)
+    if not ok2 or type(value) ~= "number" then
+        return nil
+    end
+
+    return value
+end
+
+---Compares two items purely on secondary stats, by asking Pawn to score
+---both against the character's spec scale. Only meaningful as a tie-break
+---once item level is already known to be equal - see
+---CompareItemsForCharacter.
+---@param character string
+---@param itemLinkA ItemInfo
+---@param itemLinkB ItemInfo
+---@return integer # 1 if A is preferred, -1 if B is preferred, 0 if tied or unknown
+local function CompareItemStatsForCharacter(character, itemLinkA, itemLinkB)
+    local scaleName = GetPawnScaleNameForCharacter(character)
+    if not scaleName then
+        -- Pawn isn't installed/usable, or the spec is unknown: no opinion,
+        -- leave the tie as-is rather than guessing.
+        return 0
+    end
+
+    local valueA = GetPawnItemValue(itemLinkA, scaleName)
+    local valueB = GetPawnItemValue(itemLinkB, scaleName)
+    if not valueA or not valueB or valueA == valueB then
+        return 0
+    end
+
+    return valueA > valueB and 1 or -1
+end
+
+---Compares two items of the same equip location for a character: item
+---level first, falling back to CompareItemStatsForCharacter only on an
+---exact item-level tie. This is the single comparator used everywhere
+---"which of these two items is better for this character" is decided.
+---@param character string
+---@param itemLinkA ItemInfo
+---@param itemLinkB ItemInfo
+---@return integer # 1 if A is preferred, -1 if B is preferred, 0 if tied
+local function CompareItemsForCharacter(character, itemLinkA, itemLinkB)
+    local levelA = (itemLinkA and GetActualItemLevel(itemLinkA)) or 0
+    local levelB = (itemLinkB and GetActualItemLevel(itemLinkB)) or 0
+
+    if levelA ~= levelB then
+        return levelA > levelB and 1 or -1
+    end
+
+    return CompareItemStatsForCharacter(character, itemLinkA, itemLinkB)
 end
 
 ---Checks whether a weapon or shield is one the character's specialization
@@ -672,6 +831,7 @@ end
 function HandMeDowns:ClearRecommendationCache()
     clearTable(TooltipRecommendationCache)
     clearTable(KnownSpecIDCache)
+    clearTable(PawnScaleNameCache)
 end
 
 function HandMeDowns:InvalidateRecommendationCache()
@@ -710,7 +870,16 @@ function HandMeDowns:OnTooltipSetItem(frame, ...)
         end
     end)()
 
-    frame:AddLine(distributionInfo .. " Upgrade from " .. upgradeInfo[2] .. " to " .. upgradeInfo[3] .. ".", 0, 0.75, 0.33, false)
+    local upgradeDescription
+    if upgradeInfo[4] then
+        -- Same item level as what's already available, but better secondary
+        -- stats for the character's spec.
+        upgradeDescription = "Better secondary stats at item level " .. upgradeInfo[3] .. "."
+    else
+        upgradeDescription = "Upgrade from " .. upgradeInfo[2] .. " to " .. upgradeInfo[3] .. "."
+    end
+
+    frame:AddLine(distributionInfo .. " " .. upgradeDescription, 0, 0.75, 0.33, false)
 end
 
 -- *** Finding the best character for an item
@@ -731,9 +900,16 @@ function HandMeDowns:GetCachedBestCharacterForItem(link)
     return upgradeInfo
 end
 
----Finds the best character to wear a given item
+---Finds the best character to wear a given item.
+---
+---Every character on the account - the current one included - is ranked by
+---the same priority (current level first, then equipped average item
+---level), then walked in that order; the first character the item is an
+---upgrade for is the recommendation. This means the current character is
+---not special-cased: if it happens to be first in priority order among the
+---characters that need the item, it wins, exactly like an alt would.
 ---@param link ItemInfo
----@return [string, number, number]? upgradeInfo
+---@return [string, number, number, boolean]? upgradeInfo
 function HandMeDowns:FindBestCharacterForItem(link)
     local bind = GetItemBind(link)
     if not bind then
@@ -748,47 +924,33 @@ function HandMeDowns:FindBestCharacterForItem(link)
 
     -- DataStore.ThisAccount: usually "Default"
     -- DataStore:GetCharacter(): usually "Default.Server.Name"
-
-    local currentCharacterUpgrade = HandMeDowns:FindUpgradeForCharacter(link, DataStore.ThisCharKey)
-    if currentCharacterUpgrade then
-        return currentCharacterUpgrade
-    end
-
     -- assuming "this account" is the warband
-    return HandMeDowns:FindUpgradeForCharactersOnAccount(DataStore.ThisAccount, link)
-end
 
----@param accountName string
----@param itemLink ItemInfo
----@return [string, number, number]? upgradeInfo
-function HandMeDowns:FindUpgradeForCharactersOnAccount(accountName, itemLink)
-    local upgrades = {}
-    for realmName in pairs(DataStore:GetRealms(accountName)) do
-        for _, character in pairs(DataStore:GetCharacters(realmName, accountName)) do
-            local upgradeInfo
-            if character ~= DataStore.ThisCharKey then
-                upgradeInfo = HandMeDowns:FindUpgradeForCharacter(itemLink, character)
-            end
-
-            if upgradeInfo then
-                table.insert(upgrades, upgradeInfo)
-            end
+    local characters = {}
+    for realmName in pairs(DataStore:GetRealms(DataStore.ThisAccount)) do
+        for _, character in pairs(DataStore:GetCharacters(realmName, DataStore.ThisAccount)) do
+            table.insert(characters, character)
         end
     end
 
-    table.sort(upgrades, function(left, right)
-        local leftLevel = DataStore:GetCharacterLevel(left[1]) or 0
-        local rightLevel = DataStore:GetCharacterLevel(right[1]) or 0
+    table.sort(characters, function(left, right)
+        local leftLevel = DataStore:GetCharacterLevel(left) or 0
+        local rightLevel = DataStore:GetCharacterLevel(right) or 0
         if leftLevel ~= rightLevel then
             return leftLevel > rightLevel
         end
 
-        local leftItemLevel = DataStore:GetAverageItemLevel(left[1]) or 0
-        local rightItemLevel = DataStore:GetAverageItemLevel(right[1]) or 0
+        local leftItemLevel = DataStore:GetAverageItemLevel(left) or 0
+        local rightItemLevel = DataStore:GetAverageItemLevel(right) or 0
         return leftItemLevel > rightItemLevel
     end)
 
-    return upgrades[1]
+    for _, character in ipairs(characters) do
+        local upgradeInfo = HandMeDowns:FindUpgradeForCharacter(link, character)
+        if upgradeInfo then
+            return upgradeInfo
+        end
+    end
 end
 
 ---@param candidateItemLink ItemInfo
@@ -810,9 +972,13 @@ end
 ---Retrieves upgrade information about the given item for the character.
 ---If the item is an upgrade, upgrade info is returned, `nil` otherwise.
 ---
+---An item counts as an upgrade either by item level, or - on an exact item
+---level tie against the character's best comparable item - by secondary
+---stats the character's spec favors more (see CompareItemsForCharacter).
+---
 ---@param itemLink ItemInfo
 ---@param character string
----@return [string, number, number]? upgradeInfo
+---@return [string, number, number, boolean]? upgradeInfo character, compareItemLevel, itemLevel, statOnlyUpgrade
 function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
     if not character then
         return
@@ -828,12 +994,10 @@ function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
         return
     end
 
-    local compareItemLevel = HandMeDowns:GetBestCompareItemLevel(itemLink, character)
-    if not compareItemLevel then
-        compareItemLevel = 0
-    end
+    local compareItem = HandMeDowns:GetBestCompareItem(itemLink, character)
+    local compareItemLevel = (compareItem and GetActualItemLevel(compareItem)) or 0
 
-    if compareItemLevel >= itemLevel then
+    if CompareItemsForCharacter(character, itemLink, compareItem) ~= 1 then
         -- available item is equal or better than the one we compare for
         return
     end
@@ -841,16 +1005,19 @@ function HandMeDowns:FindUpgradeForCharacter(itemLink, character)
     return {
         character,
         compareItemLevel,
-        itemLevel
+        itemLevel,
+        compareItemLevel == itemLevel
     }
 end
 
----Finds the best available item level as comparison for the given item.
+---Finds the best available item as comparison for the given item: item
+---level first, falling back to the character's spec-favored secondary
+---stats only on an exact item-level tie (see CompareItemsForCharacter).
 ---
 ---@param itemLink ItemInfo The item to compare against.
 ---@param character string The character to search within.
----@return number?
-function HandMeDowns:GetBestCompareItemLevel(itemLink, character)
+---@return ItemInfo?
+function HandMeDowns:GetBestCompareItem(itemLink, character)
     local equipmentLocation = GetItemEquipLocation(itemLink)
 
     -- inventory
@@ -896,23 +1063,21 @@ function HandMeDowns:GetBestCompareItemLevel(itemLink, character)
         return items
     end
 
-    ---@type number?
-    local bestItemLevel
+    ---@type ItemInfo?
+    local bestItem
     local items = tableConcat(tableConcat(getEquippedItems(), getStoredContainerItems()), getMailItems())
     for _, item in ipairs(items) do
         if item and IsComparableItemForCharacter(item, itemLink, character) then
-            local itemLevel = GetActualItemLevel(item)
-
-            if itemLevel and (not bestItemLevel or bestItemLevel < itemLevel) then
-                bestItemLevel = itemLevel
+            if not bestItem or CompareItemsForCharacter(character, item, bestItem) == 1 then
+                bestItem = item
             end
         end
     end
 
     --@debug@
-    if bestItemLevel then
-        HandMeDowns:Print("Best item level for " .. character .. ": " .. bestItemLevel)
+    if bestItem then
+        HandMeDowns:Print("Best item level for " .. character .. ": " .. (GetActualItemLevel(bestItem) or 0))
     end
     --@end-debug@
-    return bestItemLevel
+    return bestItem
 end
