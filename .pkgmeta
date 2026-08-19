@@ -1,2 +1,4 @@
 ignore:
   - README.md
+  - assets
+  - docs
