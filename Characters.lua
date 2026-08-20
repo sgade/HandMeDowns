@@ -243,6 +243,29 @@ function Characters.CharacterServerAndNameFromKey(key)
     return server, name
 end
 
+---A character's display name for user-facing text: just the character name
+---if it's unique across the warband, or "Name@Realm" if another warband
+---character shares the same name on a different realm.
+---@param character string
+---@return string
+function Characters.GetDisplayName(character)
+    local server, name = Characters.CharacterServerAndNameFromKey(character)
+    if not name then
+        return character
+    end
+
+    for _, other in ipairs(Characters.GetWarbandCharacters()) do
+        if other ~= character then
+            local _, otherName = Characters.CharacterServerAndNameFromKey(other)
+            if otherName == name then
+                return name .. "@" .. (server or "?")
+            end
+        end
+    end
+
+    return name
+end
+
 -- *** Warband enumeration and priority
 
 ---Every character on the account - the current one included.

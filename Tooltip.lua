@@ -124,8 +124,7 @@ function WarbandMeDowns:OnTooltipSetItem(frame, ...)
         if upgradeInfo[1] == DataStore.ThisCharKey then
             return "Use here!"
         else
-            local characterServer, characterName = Characters.CharacterServerAndNameFromKey(upgradeInfo[1])
-            return "WarbandMeDowns! Send this to " .. characterName .. "@" .. characterServer .. "."
+            return "WarbandMeDowns! Send this to " .. Characters.GetDisplayName(upgradeInfo[1]) .. "."
         end
     end)()
 
