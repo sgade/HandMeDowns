@@ -365,12 +365,24 @@ function Assignment:EnsureFresh()
 end
 
 function Assignment:Recompute()
+    --@debug@
+    local debugRecomputeStartTime = debugprofilestop()
+    --@end-debug@
+
     self:ScanWarband()
     self._sortedCharacters = Characters.GetSortedWarbandCharacters()
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
     Pawn.ClearCaches()
     self.dirty = false
+
+    --@debug@
+    WarbandMeDowns:Printf(
+        "Recomputed warband with %d characters in %.3fms.",
+        #(self._sortedCharacters),
+        debugprofilestop() - debugRecomputeStartTime
+    )
+    --@end-debug@
 end
 
 ---Marks the engine dirty and arms a debounced background recompute attempt.

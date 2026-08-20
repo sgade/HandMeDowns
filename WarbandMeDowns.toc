@@ -27,6 +27,7 @@ embeds.xml
 WarbandMeDowns.lua
 Data.lua
 Characters.lua
+Settings.lua
 Pawn.lua
 Assignment.lua
 Tooltip.lua

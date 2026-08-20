@@ -17,6 +17,8 @@ function WarbandMeDowns:OnInitialize()
     CacheInvalidationFrame:SetScript("OnEvent", function()
         WarbandMeDowns.Assignment:MarkDirty()
     end)
+
+    WarbandMeDowns.Settings:Initialize()
 end
 
 function WarbandMeDowns:OnEnable()
@@ -24,7 +26,7 @@ function WarbandMeDowns:OnEnable()
     WarbandMeDowns:RegisterCacheInvalidationEvents()
 
     --@debug@
-    WarbandMeDowns:Print("Ready.")
+    WarbandMeDowns:Print("Hooked and ready.")
     --@end-debug@
 end
 
@@ -122,8 +124,7 @@ function WarbandMeDowns:OnTooltipSetItem(frame, ...)
         if upgradeInfo[1] == DataStore.ThisCharKey then
             return "Use here!"
         else
-            local characterServer, characterName = Characters.CharacterServerAndNameFromKey(upgradeInfo[1])
-            return "WarbandMeDowns! Send this to " .. characterName .. "@" .. characterServer .. "."
+            return "WarbandMeDowns! Send this to " .. Characters.GetDisplayName(upgradeInfo[1]) .. "."
         end
     end)()
 

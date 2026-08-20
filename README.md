@@ -1,6 +1,6 @@
 # WarbandMeDowns
 
-[![GitHub Release](https://img.shields.io/github/v/release/sgade/WarbandMeDowns?sort=semver&display_name=release&style=for-the-badge&logo=github&color=rgb(20%2C4%2C120))](https://github.com/sgade/WarbandMeDowns/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/sgade/WarbandMeDowns?sort=semver&display_name=release&style=for-the-badge&logo=github&color=rgb(20%2C4%2C120))](https://github.com/sgade/WarbandMeDowns/releases) [![CurseForge Game Versions](https://img.shields.io/curseforge/game-versions/1660805?style=for-the-badge&logo=battledotnet)](https://www.curseforge.com/wow/addons/mountsrarity) [![CurseForge Downloads](https://img.shields.io/curseforge/dt/1660805?style=for-the-badge&logo=curseforge&color=rgb(206%2C109%2C59))](https://www.curseforge.com/wow/addons/mountsrarity)
 
 Recommends alt characters for warbound and bind-on-equip gear.
 
@@ -36,3 +36,7 @@ Armor, shields, and weapons are checked against class-compatible item subclasses
 ## Refreshing data sources
 
 See [DATA_SOURCES.md](docs/DATA_SOURCES.md) for information on how to refresh the information by external sources.
+
+## Issues
+
+If you find any issues with this project, feel free to raise them [here](https://github.com/sgade/WarbandMeDowns/issues).
