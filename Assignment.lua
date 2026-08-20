@@ -46,41 +46,36 @@ Assignment.pool = {}             -- pool[slotClassKey][rawEquipLoc] = { entry, .
 Assignment.floorExtra = {}       -- floorExtra[slotClassKey][rawEquipLoc] = { entry, ... }     (unsendable bag/bank/mail items)
 Assignment.entryByLink = {}      -- entryByLink[itemLink] = entry                              (first pool entry seen for a link)
 Assignment.settledBestCache = {} -- settledBestCache[slotClassKey][targetEquipLoc][character] = itemLink | false | Ineligible
-Assignment.itemLevelCache = {}   -- itemLevelCache[itemLink] = number                          (avoids repeat C_Item calls this generation)
 Assignment._sortedCharacters = {}
 Assignment._debounceToken = 0
 
----Compares two items of the same slot-class for a character: item level
----first, falling back to Pawn's secondary-stat opinion only on an exact
----item-level tie. This is the single comparator used everywhere "which of
----these two items is better for this character" is decided. Either item
----may be nil/false (an empty slot), which counts as item level 0.
+---Compares two items of the same slot-class for a character: Pawn's score
+---first, when Pawn is installed and a scale resolves for the character,
+---falling back to plain item level only when Pawn has no opinion (not
+---installed, unknown spec, or unable to score one of these two particular
+---items). This is the single comparator used everywhere "which of these
+---two items is better for this character" is decided. Either item may be
+---nil/false (an empty slot).
 ---@param character string
 ---@param itemLinkA ItemInfo
 ---@param itemLinkB ItemInfo
 ---@return integer # 1 if A is preferred, -1 if B is preferred, 0 if tied
 function Assignment.CompareItemsForCharacter(character, itemLinkA, itemLinkB)
+    local scaleName = Pawn.GetPawnScaleNameForCharacter(character)
+    if scaleName then
+        local pawnResult = Pawn.CompareItemValuesForScale(itemLinkA, itemLinkB, scaleName)
+        if pawnResult then
+            return pawnResult
+        end
+    end
+
     local levelA = (itemLinkA and Data.GetActualItemLevel(itemLinkA)) or 0
     local levelB = (itemLinkB and Data.GetActualItemLevel(itemLinkB)) or 0
-
     if levelA ~= levelB then
         return levelA > levelB and 1 or -1
     end
 
-    return Pawn.CompareItemStatsForCharacter(character, itemLinkA, itemLinkB)
-end
-
----@param link ItemInfo
----@return number
-function Assignment:_ItemLevel(link)
-    local cached = self.itemLevelCache[link]
-    if cached then
-        return cached
-    end
-
-    local level = Data.GetActualItemLevel(link) or 0
-    self.itemLevelCache[link] = level
-    return level
+    return 0
 end
 
 -- *** Phase A: single full pass over every character's bag/bank/mail items
@@ -131,7 +126,6 @@ function Assignment:ScanWarband()
     self.floorExtra = {}
     self.entryByLink = {}
     self.settledBestCache = {}
-    self.itemLevelCache = {}
 
     for _, character in ipairs(Characters.GetWarbandCharacters()) do
         Characters.IterateStoredContainerItems(character, function(_, _, _, _, itemLink)
@@ -215,30 +209,32 @@ local function UnionMatchingBuckets(bucketsBySlotClass, slotClassKey, targetEqui
     return result
 end
 
----Scans the (already item-level-sorted, descending) candidate pool for the
----first still-unclaimed entry that beats the character's floor, claiming it
----if found. Safe to stop as soon as an entry's item level drops below the
----floor's, since nothing sorted after it can win either.
+---Scans the whole unclaimed candidate pool for the single best entry that
+---beats the character's floor, claiming it if found. Unlike a plain
+---item-level ordering, a lower-ilvl entry can still win once Pawn score is
+---authoritative (see Assignment.CompareItemsForCharacter), so this can't
+---stop early the way an item-level-sorted scan could - it has to consider
+---every unclaimed candidate. Correct despite comparing entries pairwise
+---against a moving `best` rather than against `floor` every time, since the
+---comparator is transitive: once `best` already beats `floor`, anything
+---that beats `best` also beats `floor`.
 ---@param character string
 ---@param candidates table[]
 ---@param floor ItemInfo?
 ---@return table? claimedEntry
 function Assignment:_ClaimBestCandidate(character, candidates, floor)
-    local floorLevel = (floor and self:_ItemLevel(floor)) or 0
+    local best = nil
 
     for _, entry in ipairs(candidates) do
         if not entry.claimedBy then
-            if self:_ItemLevel(entry.link) < floorLevel then
-                break
-            end
-
-            if Assignment.CompareItemsForCharacter(character, entry.link, floor) == 1 then
-                return entry
+            local reference = best and best.link or floor
+            if Assignment.CompareItemsForCharacter(character, entry.link, reference) == 1 then
+                best = entry
             end
         end
     end
 
-    return nil
+    return best
 end
 
 ---Settles one (slot-class, target equip location) pair: walks the warband
@@ -259,9 +255,6 @@ function Assignment:SettleGroup(slotClassKey, targetEquipLoc, classID, subclassI
     end
 
     local candidates = UnionMatchingBuckets(self.pool, slotClassKey, targetEquipLoc)
-    table.sort(candidates, function(a, b)
-        return self:_ItemLevel(a.link) > self:_ItemLevel(b.link)
-    end)
     local floorExtra = UnionMatchingBuckets(self.floorExtra, slotClassKey, targetEquipLoc)
 
     local settledBest = {}
@@ -293,7 +286,12 @@ end
 function Assignment:BuildUpgradeInfo(character, itemLink, compareItem)
     local itemLevel = Data.GetActualItemLevel(itemLink) or 0
     local compareItemLevel = (compareItem and Data.GetActualItemLevel(compareItem)) or 0
-    return { character, compareItemLevel, itemLevel, compareItemLevel == itemLevel }
+    -- Not a strict item-level increase: either an equal-ilvl stat-only pick,
+    -- or - now that Pawn score can be authoritative - a lower-ilvl item Pawn
+    -- prefers anyway. Tooltip.lua distinguishes the two by re-comparing
+    -- itemLevel to compareItemLevel itself.
+    local statOnlyUpgrade = itemLevel <= compareItemLevel
+    return { character, compareItemLevel, itemLevel, statOnlyUpgrade }
 end
 
 ---Finds the destination for a given item: the character who should keep or
@@ -371,7 +369,7 @@ function Assignment:Recompute()
     self._sortedCharacters = Characters.GetSortedWarbandCharacters()
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
-    Pawn.ClearScaleCache()
+    Pawn.ClearCaches()
     self.dirty = false
 end
 
@@ -413,11 +411,10 @@ function Assignment:Reset()
     self.floorExtra = {}
     self.entryByLink = {}
     self.settledBestCache = {}
-    self.itemLevelCache = {}
     self._sortedCharacters = {}
     self.dirty = true
 
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
-    Pawn.ClearScaleCache()
+    Pawn.ClearCaches()
 end

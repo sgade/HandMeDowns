@@ -1,13 +1,15 @@
 --[[----------------------------------------------------------------------------
 
   HandMeDowns/Pawn.lua
-  Secondary stat tie-breaking via the optional Pawn addon
+  Item comparison via the optional Pawn addon
   (https://github.com/VgerMods/Pawn). See HandMeDowns.lua for the license
   header covering the whole addon.
 
-  HandMeDowns does not maintain its own secondary stat priorities. Instead,
-  when Pawn is installed, its own item-scoring calculation is used to break
-  an exact item-level tie between two comparable items. Pawn is not a
+  HandMeDowns does not maintain its own stat priorities. Instead, when Pawn
+  is installed, its own item-scoring calculation is used as the authoritative
+  comparison between two comparable items - item level is only used as a
+  fallback when Pawn isn't installed/usable. See
+  HandMeDowns.Assignment.CompareItemsForCharacter. Pawn is not a
   required dependency, and its functions are not a documented/versioned API
   - every call below is defensive (existence and type checks, pcall) and
   degrades silently to "no opinion" (the same fallback as an unknown spec)
@@ -25,6 +27,7 @@ local Characters = HandMeDowns.Characters
 
 local PawnScaleNameCache = {}
 local PawnScaleUnknown = {}
+local PawnItemValueCache = {} -- PawnItemValueCache[scaleName][itemLink] = number | false
 
 ---Finds the local (1-4) spec index Pawn expects, matching Blizzard's
 ---GetSpecializationInfoForClassID convention. Data.SpecsByClass is already
@@ -90,55 +93,86 @@ function Pawn.GetPawnScaleNameForCharacter(character)
     return result
 end
 
----Clears the per-character Pawn scale-name memo. Called by
----HandMeDowns.Assignment:Recompute() so a spec change is always picked up.
-function Pawn.ClearScaleCache()
+---Clears the per-character Pawn scale-name memo and the per-item value
+---cache. Called by HandMeDowns.Assignment:Recompute()/Reset() so a spec
+---change or an item shuffling around the warband is always picked up.
+function Pawn.ClearCaches()
     HandMeDowns.Util.clearTable(PawnScaleNameCache)
+    HandMeDowns.Util.clearTable(PawnItemValueCache)
 end
 
 ---Scores an item against a named Pawn scale, using Pawn's own item parsing
 ---and valuation. Never throws; returns nil for any reason a value couldn't
----be produced.
+---be produced. Memoized per (scaleName, itemLink) for the current
+---generation, since Assignment now scans the full candidate pool per
+---character instead of stopping early, which can otherwise re-score the
+---same item many times.
 ---@param itemLink ItemInfo
 ---@param scaleName string
 ---@return number?
 function Pawn.GetPawnItemValue(itemLink, scaleName)
-    if not itemLink or type(PawnGetItemData) ~= "function" or type(PawnGetSingleValueFromItem) ~= "function" then
+    if not itemLink then
         return nil
     end
 
-    local ok, item = pcall(PawnGetItemData, itemLink)
-    if not ok or type(item) ~= "table" then
-        return nil
+    local scaleCache = PawnItemValueCache[scaleName]
+    if scaleCache then
+        local cached = scaleCache[itemLink]
+        if cached ~= nil then
+            return cached or nil
+        end
+    else
+        scaleCache = {}
+        PawnItemValueCache[scaleName] = scaleCache
     end
 
-    local ok2, value = pcall(PawnGetSingleValueFromItem, item, scaleName)
-    if not ok2 or type(value) ~= "number" then
-        return nil
-    end
+    local value = (function()
+        if type(PawnGetItemData) ~= "function" or type(PawnGetSingleValueFromItem) ~= "function" then
+            return nil
+        end
 
+        local ok, item = pcall(PawnGetItemData, itemLink)
+        if not ok or type(item) ~= "table" then
+            return nil
+        end
+
+        local ok2, result = pcall(PawnGetSingleValueFromItem, item, scaleName)
+        if not ok2 or type(result) ~= "number" then
+            return nil
+        end
+
+        return result
+    end)()
+
+    scaleCache[itemLink] = value or false
     return value
 end
 
----Compares two items purely on secondary stats, by asking Pawn to score
----both against the character's spec scale. Only meaningful as a tie-break
----once item level is already known to be equal - see
----HandMeDowns.Assignment.CompareItemsForCharacter.
----@param character string
+---Compares two items purely on Pawn's score against a resolved scale. A
+---missing item (nil/false, an empty slot) always loses to a present,
+---scoreable item, and ties against another missing item. Returns nil (no
+---opinion) only when at least one *present* item couldn't be scored by
+---Pawn, so the caller can fall back to a different comparison for that
+---pair - see HandMeDowns.Assignment.CompareItemsForCharacter, the only
+---caller.
 ---@param itemLinkA ItemInfo
 ---@param itemLinkB ItemInfo
----@return integer # 1 if A is preferred, -1 if B is preferred, 0 if tied or unknown
-function Pawn.CompareItemStatsForCharacter(character, itemLinkA, itemLinkB)
-    local scaleName = Pawn.GetPawnScaleNameForCharacter(character)
-    if not scaleName then
-        -- Pawn isn't installed/usable, or the spec is unknown: no opinion,
-        -- leave the tie as-is rather than guessing.
+---@param scaleName string
+---@return integer? # 1 if A is preferred, -1 if B is preferred, 0 if tied, nil if unknown
+function Pawn.CompareItemValuesForScale(itemLinkA, itemLinkB, scaleName)
+    if not itemLinkA and not itemLinkB then
         return 0
     end
 
-    local valueA = Pawn.GetPawnItemValue(itemLinkA, scaleName)
-    local valueB = Pawn.GetPawnItemValue(itemLinkB, scaleName)
-    if not valueA or not valueB or valueA == valueB then
+    local valueA = itemLinkA and Pawn.GetPawnItemValue(itemLinkA, scaleName)
+    local valueB = itemLinkB and Pawn.GetPawnItemValue(itemLinkB, scaleName)
+    if (itemLinkA and not valueA) or (itemLinkB and not valueB) then
+        return nil
+    end
+
+    valueA = valueA or -math.huge
+    valueB = valueB or -math.huge
+    if valueA == valueB then
         return 0
     end
 

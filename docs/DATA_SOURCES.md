@@ -39,15 +39,26 @@ flagged inline in the source comments above `SetSpecWeaponSubclasses` calls
 those still hold true each time this is refreshed; they can go stale
 independently of the DB2 data.
 
-## Secondary stat priorities (delegated to Pawn, `CompareItemStatsForCharacter`)
+## Item comparison (delegated to Pawn, `CompareItemValuesForScale`)
 
 HandMeDowns used to hardcode a per-spec table of secondary stat priorities,
-hand-transcribed from Wowhead's guides. That table is gone. Secondary-stat
-tie-breaking is instead delegated live to the optional
+hand-transcribed from Wowhead's guides. That table is gone. Item comparison
+is instead delegated live to the optional
 [Pawn](https://github.com/VgerMods/Pawn) addon, if the player has it
 installed - Pawn's entire purpose is scoring items against per-spec stat
-weights, so HandMeDowns just asks it rather than maintaining its own,
-inherently-theorycrafted copy of the same data.
+weights (including main stat), so HandMeDowns just asks it rather than
+maintaining its own, inherently-theorycrafted copy of the same data.
+
+When Pawn is installed and a scale resolves for a character (see "Why a
+scale is always available" below), its score is the *authoritative*
+comparison between two items - not just a tie-break. That matters because
+item level alone can't tell a same-slot Intellect item from a Strength one:
+a higher-ilvl item with the wrong main stat can score worse than a
+lower-ilvl item with the right one. Item level is only used as a fallback:
+when Pawn isn't installed, the spec is unknown, or Pawn can't produce a
+score for one of the two specific items being compared. See
+`Assignment.CompareItemsForCharacter` in `Assignment.lua`, the single
+comparator this all funnels through.
 
 **Why this is possible**: Pawn exposes genuine global Lua functions other
 addons can call - this isn't reverse-engineering. Pawn's own
@@ -90,7 +101,7 @@ per-user setup.
 validates the type of whatever comes back before trusting it. Any failure
 at any step - Pawn not installed, a renamed/removed function, an unexpected
 return shape, an internal Pawn error - degrades silently to "no opinion",
-identical to today's "spec unknown" fallback (item level is the only
+identical to today's "spec unknown" fallback (item level becomes the
 comparison, and an exact tie means neither item is recommended over the
 other). Nothing here should ever be able to produce a visible error for a
 player who simply doesn't have Pawn installed.
@@ -104,7 +115,7 @@ read of a large Lua file when re-verifying this integration; fetch and read
 the actual source.
 
 **To refresh**: if a future Pawn update renames or reshapes these functions
-and HandMeDowns' Pawn integration silently stops contributing tie-breaks
+and HandMeDowns' Pawn integration silently stops contributing scores
 (it will not error - see above), re-fetch Pawn's current source the same
 way and re-check `PawnFindScaleForSpec`, `PawnGetItemData`, and
 `PawnGetSingleValueFromItem` still exist with the same parameter order and
