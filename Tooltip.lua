@@ -129,9 +129,16 @@ function HandMeDowns:OnTooltipSetItem(frame, ...)
 
     local upgradeDescription
     if upgradeInfo[4] then
-        -- Same item level as what's already available, but better secondary
-        -- stats for the character's spec.
-        upgradeDescription = "Better secondary stats at item level " .. upgradeInfo[3] .. "."
+        if upgradeInfo[3] == upgradeInfo[2] then
+            -- Same item level as what's already available, but better
+            -- secondary stats for the character's spec.
+            upgradeDescription = "Better secondary stats at item level " .. upgradeInfo[3] .. "."
+        else
+            -- Pawn is authoritative and prefers this item despite a lower
+            -- item level than what's already available.
+            upgradeDescription = "Better secondary stats despite lower item level (" ..
+                upgradeInfo[2] .. " -> " .. upgradeInfo[3] .. ")."
+        end
     else
         upgradeDescription = "Upgrade from " .. upgradeInfo[2] .. " to " .. upgradeInfo[3] .. "."
     end
