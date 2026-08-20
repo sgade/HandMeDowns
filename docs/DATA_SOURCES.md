@@ -1,6 +1,6 @@
 # Data sources for spec preferences
 
-HandMeDowns hardcodes one kind of per-spec preference data in
+WarbandMeDowns hardcodes one kind of per-spec preference data in
 `Data.lua`: which weapon/shield subclasses a spec actually uses. It
 drifts with patches - this doc records where it came from and how to
 refresh it. Secondary stat preferences (Crit/Haste/Mastery/Versatility) are
@@ -41,12 +41,12 @@ independently of the DB2 data.
 
 ## Item comparison (delegated to Pawn, `CompareItemValuesForScale`)
 
-HandMeDowns used to hardcode a per-spec table of secondary stat priorities,
+WarbandMeDowns used to hardcode a per-spec table of secondary stat priorities,
 hand-transcribed from Wowhead's guides. That table is gone. Item comparison
 is instead delegated live to the optional
 [Pawn](https://github.com/VgerMods/Pawn) addon, if the player has it
 installed - Pawn's entire purpose is scoring items against per-spec stat
-weights (including main stat), so HandMeDowns just asks it rather than
+weights (including main stat), so WarbandMeDowns just asks it rather than
 maintaining its own, inherently-theorycrafted copy of the same data.
 
 When Pawn is installed and a scale resolves for a character (see "Why a
@@ -63,24 +63,24 @@ comparator this all funnels through.
 **Why this is possible**: Pawn exposes genuine global Lua functions other
 addons can call - this isn't reverse-engineering. Pawn's own
 ArkInventory-rule integration (`GetPawnStatusForArkInventoryRule` in
-`Pawn.lua`) calls the exact same functions HandMeDowns uses, confirming
+`Pawn.lua`) calls the exact same functions WarbandMeDowns uses, confirming
 they're meant for cross-addon use. Verified by reading Pawn's actual source
 (not a summarized/fetched version - see the "verification method" note
 below) at `github.com/VgerMods/Pawn`, `master` branch, **Pawn version
-2.13.16**, same `## Interface: 120100` as HandMeDowns, on 2026-08-19.
+2.13.16**, same `## Interface: 120100` as WarbandMeDowns, on 2026-08-19.
 
 **Functions relied on** (all in `Pawn.lua`):
 - `PawnGetItemData(itemLink)` - parses an item link into a table with
   `.Stats`, `.Level`, `.SocketBonusStats`. Link-based, so it works for any
   item link regardless of which character owns it, same as the WoW APIs
-  HandMeDowns already calls directly (`C_Item.GetItemInfo` etc.).
+  WarbandMeDowns already calls directly (`C_Item.GetItemInfo` etc.).
 - `PawnFindScaleForSpec(classID, specID)` - returns the name of a
   plugin-provided scale for a class+spec, or `nil`. **`classID` is
   Blizzard's numeric class ID (1-13)**; **`specID` here is the local 1-4
   spec index** (`GetSpecializationInfoForClassID`'s convention - confirmed
   against `ScaleTemplates.lua`'s own template entries, e.g. Druid Feral is
   listed as `ClassID 11, SpecID 2`), **not** the global spec ID DataStore
-  and the rest of HandMeDowns use. `GetPawnLocalSpecIndex` in
+  and the rest of WarbandMeDowns use. `GetPawnLocalSpecIndex` in
   `Pawn.lua` converts between the two using `Data.lua`'s existing
   `SpecsByClass` ordering, which already matches this convention.
 - `PawnGetSingleValueFromItem(item, scaleName)` - returns a single numeric
@@ -115,7 +115,7 @@ read of a large Lua file when re-verifying this integration; fetch and read
 the actual source.
 
 **To refresh**: if a future Pawn update renames or reshapes these functions
-and HandMeDowns' Pawn integration silently stops contributing scores
+and WarbandMeDowns' Pawn integration silently stops contributing scores
 (it will not error - see above), re-fetch Pawn's current source the same
 way and re-check `PawnFindScaleForSpec`, `PawnGetItemData`, and
 `PawnGetSingleValueFromItem` still exist with the same parameter order and

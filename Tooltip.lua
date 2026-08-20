@@ -1,62 +1,62 @@
 --[[----------------------------------------------------------------------------
 
-  HandMeDowns/Tooltip.lua
+  WarbandMeDowns/Tooltip.lua
   Addon lifecycle, the GameTooltip hook, and cache-invalidation event wiring.
-  See HandMeDowns.lua for the license header covering the whole addon.
+  See WarbandMeDowns.lua for the license header covering the whole addon.
 
 ----------------------------------------------------------------------------]]--
 
-local Characters = HandMeDowns.Characters
+local Characters = WarbandMeDowns.Characters
 
 local CacheInvalidationFrame
 
 -- *** Lifecycle
 
-function HandMeDowns:OnInitialize()
+function WarbandMeDowns:OnInitialize()
     CacheInvalidationFrame = CreateFrame("Frame")
     CacheInvalidationFrame:SetScript("OnEvent", function()
-        HandMeDowns.Assignment:MarkDirty()
+        WarbandMeDowns.Assignment:MarkDirty()
     end)
 end
 
-function HandMeDowns:OnEnable()
-    HandMeDowns:HookItemTooltips()
-    HandMeDowns:RegisterCacheInvalidationEvents()
+function WarbandMeDowns:OnEnable()
+    WarbandMeDowns:HookItemTooltips()
+    WarbandMeDowns:RegisterCacheInvalidationEvents()
 
     --@debug@
-    HandMeDowns:Print("Ready.")
+    WarbandMeDowns:Print("Ready.")
     --@end-debug@
 end
 
-function HandMeDowns:OnDisable()
+function WarbandMeDowns:OnDisable()
     if CacheInvalidationFrame then
         CacheInvalidationFrame:UnregisterAllEvents()
     end
 
-    HandMeDowns.Assignment:Reset()
+    WarbandMeDowns.Assignment:Reset()
 
     --@debug@
-    HandMeDowns:Print("Disabled.")
+    WarbandMeDowns:Print("Disabled.")
     --@end-debug@
 end
 
-function HandMeDowns:HookItemTooltips()
-    if HandMeDowns.tooltipHooksRegistered then
+function WarbandMeDowns:HookItemTooltips()
+    if WarbandMeDowns.tooltipHooksRegistered then
         return
     end
 
-    HandMeDowns.tooltipHooksRegistered = true
+    WarbandMeDowns.tooltipHooksRegistered = true
 
     local function onTooltipSetItem(frame, ...)
-        local success, errorMessage = pcall(HandMeDowns.OnTooltipSetItem, HandMeDowns, frame, ...)
+        local success, errorMessage = pcall(WarbandMeDowns.OnTooltipSetItem, WarbandMeDowns, frame, ...)
         if not success then
-            HandMeDowns:Print("tooltip error: " .. tostring(errorMessage))
+            WarbandMeDowns:Print("tooltip error: " .. tostring(errorMessage))
         end
     end
 
     if TooltipDataProcessor then
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(frame, ...)
-            if frame == GameTooltip and HandMeDowns:IsEnabled() then
+            if frame == GameTooltip and WarbandMeDowns:IsEnabled() then
                 return onTooltipSetItem(frame, ...)
             end
         end)
@@ -68,7 +68,7 @@ function HandMeDowns:HookItemTooltips()
     end
 end
 
-function HandMeDowns:RegisterCacheInvalidationEvents()
+function WarbandMeDowns:RegisterCacheInvalidationEvents()
     if not CacheInvalidationFrame then
         return
     end
@@ -98,7 +98,7 @@ end
 
 ---Hooks the tooltip
 ---@param frame GameTooltip
-function HandMeDowns:OnTooltipSetItem(frame, ...)
+function WarbandMeDowns:OnTooltipSetItem(frame, ...)
     ---@type string, ItemInfo
     ---@diagnostic disable-next-line: assign-type-mismatch
     local _, itemLink = frame:GetItem()
@@ -106,13 +106,13 @@ function HandMeDowns:OnTooltipSetItem(frame, ...)
         return
     end
 
-    local result = HandMeDowns.Assignment:GetBestCharacterForItem(itemLink)
+    local result = WarbandMeDowns.Assignment:GetBestCharacterForItem(itemLink)
     if not result then
         return
     end
 
-    if result == HandMeDowns.Assignment.Sell then
-        frame:AddLine("HandMeDowns! No character can use this - sell it.", 0, 0.75, 0.33, false)
+    if result == WarbandMeDowns.Assignment.Sell then
+        frame:AddLine("WarbandMeDowns! No character can use this - sell it.", 0, 0.75, 0.33, false)
         return
     end
 
@@ -123,7 +123,7 @@ function HandMeDowns:OnTooltipSetItem(frame, ...)
             return "Use here!"
         else
             local characterServer, characterName = Characters.CharacterServerAndNameFromKey(upgradeInfo[1])
-            return "HandMeDowns! Send this to " .. characterName .. "@" .. characterServer .. "."
+            return "WarbandMeDowns! Send this to " .. characterName .. "@" .. characterServer .. "."
         end
     end)()
 

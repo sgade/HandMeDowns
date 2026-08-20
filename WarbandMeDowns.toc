@@ -1,5 +1,5 @@
 ## Interface: 120100
-## Title: HandMeDowns
+## Title: WarbandMeDowns
 ## Notes: Recommends twinks for warbound gear
 ## Author: Kiaro-Frostwolf
 ## Version: @project-version@
@@ -16,13 +16,13 @@
 ## Category-ruRU: Экипировка
 ## Category-zhCN: 装备
 ## Category-zhTW: 裝備
-## X-Website: https://github.com/sgade/HandMeDowns
-## X-Source-URL: https://github.com/sgade/HandMeDowns
-## X-Issues-URL: https://github.com/sgade/HandMeDowns/issues
+## X-Website: https://github.com/sgade/WarbandMeDowns
+## X-Source-URL: https://github.com/sgade/WarbandMeDowns
+## X-Issues-URL: https://github.com/sgade/WarbandMeDowns/issues
 
 embeds.xml
 
-HandMeDowns.lua
+WarbandMeDowns.lua
 Data.lua
 Characters.lua
 Pawn.lua

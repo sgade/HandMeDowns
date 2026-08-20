@@ -1,14 +1,14 @@
 --[[----------------------------------------------------------------------------
 
-  HandMeDowns/Data.lua
+  WarbandMeDowns/Data.lua
   Item taxonomy: class/spec/weapon/armor eligibility data, plus pure
   item-info helpers that need no DataStore calls and hold no addon state.
-  See HandMeDowns.lua for the license header covering the whole addon.
+  See WarbandMeDowns.lua for the license header covering the whole addon.
 
 ----------------------------------------------------------------------------]]--
 
-HandMeDowns.Data = HandMeDowns.Data or {}
-local Data = HandMeDowns.Data
+WarbandMeDowns.Data = WarbandMeDowns.Data or {}
+local Data = WarbandMeDowns.Data
 
 local ItemClassArmor = (Enum and Enum.ItemClass and Enum.ItemClass.Armor) or LE_ITEM_CLASS_ARMOR or 4
 local ItemClassWeapon = (Enum and Enum.ItemClass and Enum.ItemClass.Weapon) or LE_ITEM_CLASS_WEAPON or 2
@@ -92,7 +92,7 @@ SetWeaponSubclassClasses(WeaponSubclass.FishingPole, {"WARRIOR", "PALADIN", "DEA
 -- "could this class ever equip this?", these answer "would this spec ever want it?".
 -- Every subclass listed here must also appear in that class' entry above,
 -- because the class-level check always runs first (see
--- HandMeDowns.Characters.CanCharacterEquipItemClass).
+-- WarbandMeDowns.Characters.CanCharacterEquipItemClass).
 local SpecsByClass = {}
 local SpecClass = {}
 local SpecWeaponSubclasses = {}
@@ -282,7 +282,7 @@ for class, specIDs in pairs(SpecsByClass) do
 end
 
 -- Numeric class IDs, Blizzard-stable, used only to talk to Pawn (see
--- HandMeDowns.Pawn.GetPawnScaleNameForCharacter) - Pawn's scale-lookup
+-- WarbandMeDowns.Pawn.GetPawnScaleNameForCharacter) - Pawn's scale-lookup
 -- functions take these instead of the classFile strings DataStore uses.
 Data.ClassID = {
     WARRIOR = 1, PALADIN = 2, HUNTER = 3, ROGUE = 4, PRIEST = 5,
@@ -403,12 +403,12 @@ function Data.CanItemBeSentToTwink(bindType)
         Enum.ItemBind.ToBnetAccount,
         Enum.ItemBind.ToBnetAccountUntilEquipped
     }
-    return HandMeDowns.Util.arrayContains(relevantForTwinks, bindType)
+    return WarbandMeDowns.Util.arrayContains(relevantForTwinks, bindType)
 end
 
----Groups items the way HandMeDowns.Data.AreComparableItemTypes does: two
+---Groups items the way WarbandMeDowns.Data.AreComparableItemTypes does: two
 ---items are only ever comparable within the same slot-class. Used to bucket
----warband items in HandMeDowns.Assignment without repeating this pairing
+---warband items in WarbandMeDowns.Assignment without repeating this pairing
 ---logic there.
 ---@param classID number
 ---@param subclassID number?

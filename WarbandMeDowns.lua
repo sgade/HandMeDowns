@@ -1,6 +1,6 @@
 --[[----------------------------------------------------------------------------
 
-  HandMeDowns/HandMeDowns.lua
+  WarbandMeDowns/WarbandMeDowns.lua
   Recommends twinks for warbound gear
 
   Copyright (c) 2025 Sören Gade
@@ -25,15 +25,15 @@
 -- This file only creates the addon object and the small set of generic
 -- helpers shared across every other file. WoW addon files are separate Lua
 -- chunks - `local`s never cross files - so anything that needs to be shared
--- lives as a namespaced field on this table instead (HandMeDowns.Data,
--- HandMeDowns.Characters, HandMeDowns.Pawn, HandMeDowns.Assignment). See
--- HandMeDowns.toc for load order: this file must load first.
+-- lives as a namespaced field on this table instead (WarbandMeDowns.Data,
+-- WarbandMeDowns.Characters, WarbandMeDowns.Pawn, WarbandMeDowns.Assignment). See
+-- WarbandMeDowns.toc for load order: this file must load first.
 
-HandMeDowns = LibStub("AceAddon-3.0"):NewAddon("HandMeDowns", "AceConsole-3.0")
+WarbandMeDowns = LibStub("AceAddon-3.0"):NewAddon("WarbandMeDowns", "AceConsole-3.0")
 
-HandMeDowns.Util = {}
+WarbandMeDowns.Util = {}
 
-function HandMeDowns.Util.arrayContains(array, element)
+function WarbandMeDowns.Util.arrayContains(array, element)
     for _, value in ipairs(array) do
         if value == element then
             return true
@@ -42,7 +42,7 @@ function HandMeDowns.Util.arrayContains(array, element)
     return false
 end
 
-function HandMeDowns.Util.clearTable(table)
+function WarbandMeDowns.Util.clearTable(table)
     for key in pairs(table) do
         table[key] = nil
     end

@@ -1,6 +1,6 @@
 --[[----------------------------------------------------------------------------
 
-  HandMeDowns/Assignment.lua
+  WarbandMeDowns/Assignment.lua
   The global warband assignment engine.
 
   Instead of answering "is this hovered item an upgrade?" from scratch on
@@ -9,7 +9,7 @@
   bagged, banked, and mailed item across the whole warband at once, so a
   spare in one character's bag can cascade down to a lower-priority
   character instead of being invisible to the recommendation. See
-  HandMeDowns.lua for the license header covering the whole addon.
+  WarbandMeDowns.lua for the license header covering the whole addon.
 
   Every item instance in the warband falls into exactly one bucket, decided
   once per recompute in ScanWarband:
@@ -30,11 +30,11 @@
 
 ----------------------------------------------------------------------------]]--
 
-HandMeDowns.Assignment = HandMeDowns.Assignment or {}
-local Assignment = HandMeDowns.Assignment
-local Data = HandMeDowns.Data
-local Characters = HandMeDowns.Characters
-local Pawn = HandMeDowns.Pawn
+WarbandMeDowns.Assignment = WarbandMeDowns.Assignment or {}
+local Assignment = WarbandMeDowns.Assignment
+local Data = WarbandMeDowns.Data
+local Characters = WarbandMeDowns.Characters
+local Pawn = WarbandMeDowns.Pawn
 
 -- Sentinels, mirroring the old CacheMiss idiom.
 Assignment.Sell = {}         -- confirmed upgrade for nobody: drives the tooltip's sell line
@@ -139,7 +139,7 @@ function Assignment:ScanWarband()
         elseif not WarnedMissingMailAPI then
             WarnedMissingMailAPI = true
             --@alpha@
-            HandMeDowns:Print("warn: DataStore.IterateMails not available.")
+            WarbandMeDowns:Print("warn: DataStore.IterateMails not available.")
             --@end-alpha@
         end
     end
@@ -295,7 +295,7 @@ function Assignment:BuildUpgradeInfo(character, itemLink, compareItem)
 end
 
 ---Finds the destination for a given item: the character who should keep or
----receive it, HandMeDowns.Assignment.Sell if it's confirmed to be an
+---receive it, WarbandMeDowns.Assignment.Sell if it's confirmed to be an
 ---upgrade for nobody, or nil if it was never eligible to be sent to a twink
 ---at all (wrong bind type, not armor/weapon, or not equippable).
 ---

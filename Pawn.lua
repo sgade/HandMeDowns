@@ -1,15 +1,15 @@
 --[[----------------------------------------------------------------------------
 
-  HandMeDowns/Pawn.lua
+  WarbandMeDowns/Pawn.lua
   Item comparison via the optional Pawn addon
-  (https://github.com/VgerMods/Pawn). See HandMeDowns.lua for the license
+  (https://github.com/VgerMods/Pawn). See WarbandMeDowns.lua for the license
   header covering the whole addon.
 
-  HandMeDowns does not maintain its own stat priorities. Instead, when Pawn
+  WarbandMeDowns does not maintain its own stat priorities. Instead, when Pawn
   is installed, its own item-scoring calculation is used as the authoritative
   comparison between two comparable items - item level is only used as a
   fallback when Pawn isn't installed/usable. See
-  HandMeDowns.Assignment.CompareItemsForCharacter. Pawn is not a
+  WarbandMeDowns.Assignment.CompareItemsForCharacter. Pawn is not a
   required dependency, and its functions are not a documented/versioned API
   - every call below is defensive (existence and type checks, pcall) and
   degrades silently to "no opinion" (the same fallback as an unknown spec)
@@ -20,10 +20,10 @@
 
 ----------------------------------------------------------------------------]]--
 
-HandMeDowns.Pawn = HandMeDowns.Pawn or {}
-local Pawn = HandMeDowns.Pawn
-local Data = HandMeDowns.Data
-local Characters = HandMeDowns.Characters
+WarbandMeDowns.Pawn = WarbandMeDowns.Pawn or {}
+local Pawn = WarbandMeDowns.Pawn
+local Data = WarbandMeDowns.Data
+local Characters = WarbandMeDowns.Characters
 
 local PawnScaleNameCache = {}
 local PawnScaleUnknown = {}
@@ -94,11 +94,11 @@ function Pawn.GetPawnScaleNameForCharacter(character)
 end
 
 ---Clears the per-character Pawn scale-name memo and the per-item value
----cache. Called by HandMeDowns.Assignment:Recompute()/Reset() so a spec
+---cache. Called by WarbandMeDowns.Assignment:Recompute()/Reset() so a spec
 ---change or an item shuffling around the warband is always picked up.
 function Pawn.ClearCaches()
-    HandMeDowns.Util.clearTable(PawnScaleNameCache)
-    HandMeDowns.Util.clearTable(PawnItemValueCache)
+    WarbandMeDowns.Util.clearTable(PawnScaleNameCache)
+    WarbandMeDowns.Util.clearTable(PawnItemValueCache)
 end
 
 ---Scores an item against a named Pawn scale, using Pawn's own item parsing
@@ -153,7 +153,7 @@ end
 ---scoreable item, and ties against another missing item. Returns nil (no
 ---opinion) only when at least one *present* item couldn't be scored by
 ---Pawn, so the caller can fall back to a different comparison for that
----pair - see HandMeDowns.Assignment.CompareItemsForCharacter, the only
+---pair - see WarbandMeDowns.Assignment.CompareItemsForCharacter, the only
 ---caller.
 ---@param itemLinkA ItemInfo
 ---@param itemLinkB ItemInfo

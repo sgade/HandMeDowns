@@ -1,16 +1,16 @@
 --[[----------------------------------------------------------------------------
 
-  HandMeDowns/Characters.lua
+  WarbandMeDowns/Characters.lua
   Warband character enumeration/priority and DataStore-backed eligibility
   checks (class/spec weapon and shield preferences, equipped-item lookup,
-  bag/bank iteration). See HandMeDowns.lua for the license header covering
+  bag/bank iteration). See WarbandMeDowns.lua for the license header covering
   the whole addon.
 
 ----------------------------------------------------------------------------]]--
 
-HandMeDowns.Characters = HandMeDowns.Characters or {}
-local Characters = HandMeDowns.Characters
-local Data = HandMeDowns.Data
+WarbandMeDowns.Characters = WarbandMeDowns.Characters or {}
+local Characters = WarbandMeDowns.Characters
+local Data = WarbandMeDowns.Data
 
 -- *** Specialization resolution
 
@@ -36,7 +36,7 @@ function Characters.GetKnownSpecID(character)
         --@alpha@
         if not WarnedMissingSpecAPI then
             WarnedMissingSpecAPI = true
-            HandMeDowns:Print("warn: DataStore.GetActiveSpecInfo not available.")
+            WarbandMeDowns:Print("warn: DataStore.GetActiveSpecInfo not available.")
         end
         --@end-alpha@
         KnownSpecIDCache[character] = SpecUnknown
@@ -54,9 +54,9 @@ function Characters.GetKnownSpecID(character)
 end
 
 ---Clears the per-character active-spec memo. Called by
----HandMeDowns.Assignment:Recompute() so a spec change is always picked up.
+---WarbandMeDowns.Assignment:Recompute() so a spec change is always picked up.
 function Characters.ClearSpecCache()
-    HandMeDowns.Util.clearTable(KnownSpecIDCache)
+    WarbandMeDowns.Util.clearTable(KnownSpecIDCache)
 end
 
 ---Checks whether a weapon or shield is one the character's specialization
@@ -144,7 +144,7 @@ function Characters.CanCharacterEquipItemClass(character, classID, subclassID)
             local warningKey = tostring(classID) .. "." .. tostring(subclassID)
             if not WarnedItemSubclasses[warningKey] then
                 WarnedItemSubclasses[warningKey] = true
-                HandMeDowns:Print("warn: unknown item subclass '" .. warningKey .. "'")
+                WarbandMeDowns:Print("warn: unknown item subclass '" .. warningKey .. "'")
             end
             --@end-alpha@
             return false
@@ -152,7 +152,7 @@ function Characters.CanCharacterEquipItemClass(character, classID, subclassID)
 
         local _, class = DataStore:GetCharacterClass(character)
 
-        if not HandMeDowns.Util.arrayContains(classesThatCanUseItem, class) then
+        if not WarbandMeDowns.Util.arrayContains(classesThatCanUseItem, class) then
             return false
         end
 
@@ -164,10 +164,10 @@ function Characters.CanCharacterEquipItemClass(character, classID, subclassID)
 end
 
 ---Clears the per-(character, classID, subclassID) eligibility memo. Called
----by HandMeDowns.Assignment:Recompute() whenever the warband might have
+---by WarbandMeDowns.Assignment:Recompute() whenever the warband might have
 ---changed (e.g. a spec change).
 function Characters.ClearEligibilityCache()
-    HandMeDowns.Util.clearTable(EligibilityCache)
+    WarbandMeDowns.Util.clearTable(EligibilityCache)
 end
 
 ---@param character string
@@ -267,7 +267,7 @@ end
 ---EXTENSION POINT: this is the one place warband priority is decided.
 ---Replace this function reference to change the ordering later (e.g. a
 ---manual per-character order, or a different set of criteria) without
----touching anything that consumes HandMeDowns.Characters.GetSortedWarbandCharacters().
+---touching anything that consumes WarbandMeDowns.Characters.GetSortedWarbandCharacters().
 ---Only this default is implemented today.
 ---@param left string
 ---@param right string
@@ -284,7 +284,7 @@ function Characters.CharacterPriorityComparator(left, right)
     return leftItemLevel > rightItemLevel
 end
 
----The warband, ranked by HandMeDowns.Characters.CharacterPriorityComparator.
+---The warband, ranked by WarbandMeDowns.Characters.CharacterPriorityComparator.
 ---The current character is not special-cased: it's ranked like any other
 ---and wins only if it comes first among the characters that need an item.
 ---@return string[]
