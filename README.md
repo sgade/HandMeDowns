@@ -26,7 +26,7 @@ Armor, shields, and weapons are checked against class-compatible item subclasses
 - [DataStore_Characters](https://www.curseforge.com/wow/addons/datastore_characters)
 - [DataStore_Inventory](https://www.curseforge.com/wow/addons/datastore_inventory)
 - [DataStore_Containers](https://www.curseforge.com/wow/addons/datastore_containers)
-- [DataStore_Mails](https://www.curseforge.com/wow/addons/datastore_mail)
+- [DataStore_Mails](https://www.curseforge.com/wow/addons/datastore_mails)
 
 ## Optional dependencies
 

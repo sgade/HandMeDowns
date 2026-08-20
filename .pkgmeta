@@ -2,3 +2,18 @@ ignore:
   - README.md
   - assets
   - docs
+
+required-dependencies:
+  - datastore
+  - datastore_characters
+  - datastore_inventory
+  - datastore_containers
+  - datastore_mails
+
+optional-dependencies:
+  - datastore_talents
+  - pawn
+
+embedded-libraries:
+  - libstub
+  - ace3
