@@ -26,7 +26,7 @@ function WarbandMeDowns:OnEnable()
     WarbandMeDowns:RegisterCacheInvalidationEvents()
 
     --@debug@
-    WarbandMeDowns:Print("Ready.")
+    WarbandMeDowns:Print("Hooked and ready.")
     --@end-debug@
 end
 
