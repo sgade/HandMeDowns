@@ -20,6 +20,7 @@
 ## X-Website: https://github.com/sgade/WarbandMeDowns
 ## X-Source-URL: https://github.com/sgade/WarbandMeDowns
 ## X-Issues-URL: https://github.com/sgade/WarbandMeDowns/issues
+## X-Curse-Project-ID: 1660805
 
 embeds.xml
 

@@ -1,5 +1,9 @@
 name: Package and release
 
+concurrency:
+  group: production
+  cancel-in-progress: false
+
 on:
   push:
     tags:
@@ -9,11 +13,13 @@ jobs:
   release:
     name: Package and release
     runs-on: ubuntu-latest
+    environment: CurseForge
     env:
       GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
