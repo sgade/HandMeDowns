@@ -3,6 +3,7 @@
 ## Notes: Recommends twinks for warbound gear
 ## Author: Kiaro-Frostwolf
 ## Version: @project-version@
+## IconTexture: Interface/AddOns/WarbandMeDowns/WarbandMeDowns.jpeg
 ## Dependencies: DataStore, DataStore_Characters, DataStore_Inventory, DataStore_Containers, DataStore_Mails
 ## OptionalDeps: DataStore_Talents, Pawn
 ## Category-enUS: Equipment
