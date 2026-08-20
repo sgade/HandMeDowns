@@ -17,6 +17,8 @@ function WarbandMeDowns:OnInitialize()
     CacheInvalidationFrame:SetScript("OnEvent", function()
         WarbandMeDowns.Assignment:MarkDirty()
     end)
+
+    WarbandMeDowns.Settings:Initialize()
 end
 
 function WarbandMeDowns:OnEnable()
