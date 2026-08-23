@@ -406,6 +406,77 @@ function Data.CanItemBeSentToTwink(bindType)
     return WarbandMeDowns.Util.arrayContains(relevantForTwinks, bindType)
 end
 
+local MinRecommendableQuality = (Enum and Enum.ItemQuality and Enum.ItemQuality.Uncommon) or LE_ITEM_QUALITY_UNCOMMON or 2
+
+---@param link ItemInfo
+---@return number quality
+function Data.GetItemQuality(link)
+    local _, _, quality = C_Item.GetItemInfo(link)
+    return quality
+end
+
+---Grey/white items are never worth recommending, regardless of bind type.
+---@param quality number?
+---@return boolean
+function Data.IsQualityEligible(quality)
+    return quality ~= nil and quality >= MinRecommendableQuality
+end
+
+---Bind types where equipping the item converts it to Soulbound - unlike
+---ToWoWAccount/ToBnetAccount, which stay account-bound (sendable) forever
+---regardless of equip history.
+---@type Enum.ItemBind[]
+local ConvertsToSoulboundOnEquip = {
+    Enum.ItemBind.OnEquip,
+    Enum.ItemBind.ToBnetAccountUntilEquipped,
+}
+
+---Whether a specific item instance is currently actually Soulbound, as
+---opposed to Data.GetItemBind's static classification (e.g. "Bind on
+---Equip"), which never changes once an instance actually binds.
+---
+---itemLocation - only ever obtainable for the currently logged-in
+---character's own reachable items (bags/bank/equipped) - gives an
+---authoritative live answer via C_Item.IsBound. Without one (any other
+---warband character, read from DataStore's stored, possibly-stale
+---snapshots, which never carry live bind state), the rule is simply:
+---equipped means Soulbound (equipping always binds it), anything sitting in
+---bags/bank/mail is assumed not yet bound.
+---@param bindType Enum.ItemBind
+---@param isEquipped boolean
+---@param itemLocation ItemLocation?
+---@return boolean
+function Data.IsActuallySoulbound(bindType, isEquipped, itemLocation)
+    if not WarbandMeDowns.Util.arrayContains(ConvertsToSoulboundOnEquip, bindType) then
+        return false
+    end
+
+    if itemLocation then
+        return C_Item.IsBound(itemLocation) == true
+    end
+
+    return isEquipped == true
+end
+
+---Live ItemLocation for a real bag/bank slot - only ever valid for the
+---currently logged-in character (ItemLocation cannot reference another
+---character's items). Returns nil if unavailable or invalid.
+---@param bagID number
+---@param slotID number
+---@return ItemLocation?
+function Data.GetLiveBagItemLocation(bagID, slotID)
+    if not ItemLocation or not ItemLocation.CreateFromBagAndSlot then
+        return nil
+    end
+
+    local location = ItemLocation:CreateFromBagAndSlot(bagID, slotID)
+    if location and location:IsValid() then
+        return location
+    end
+
+    return nil
+end
+
 ---Groups items the way WarbandMeDowns.Data.AreComparableItemTypes does: two
 ---items are only ever comparable within the same slot-class. Used to bucket
 ---warband items in WarbandMeDowns.Assignment without repeating this pairing

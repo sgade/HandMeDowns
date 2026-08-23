@@ -98,6 +98,31 @@ end
 
 -- *** Setting the tooltip
 
+---Live ItemLocation for whatever real item instance the tooltip is
+---currently displaying (bags/bank/equipped/mail/trade/AH/...) - nil for
+---anything without a live backing instance (a bare chat item link, ...) or
+---on clients predating this API.
+---@param frame GameTooltip
+---@return ItemLocation?
+local function GetHoveredItemLocation(frame)
+    if not frame.GetPrimaryTooltipData or not C_Item.GetItemLocation then
+        return nil
+    end
+
+    local tooltipData = frame:GetPrimaryTooltipData()
+    local guid = tooltipData and tooltipData.guid
+    if not guid then
+        return nil
+    end
+
+    local location = C_Item.GetItemLocation(guid)
+    if location and location:IsValid() then
+        return location
+    end
+
+    return nil
+end
+
 ---Hooks the tooltip
 ---@param frame GameTooltip
 function WarbandMeDowns:OnTooltipSetItem(frame, ...)
@@ -108,7 +133,8 @@ function WarbandMeDowns:OnTooltipSetItem(frame, ...)
         return
     end
 
-    local result = WarbandMeDowns.Assignment:GetBestCharacterForItem(itemLink)
+    local itemLocation = GetHoveredItemLocation(frame)
+    local result = WarbandMeDowns.Assignment:GetBestCharacterForItem(itemLink, itemLocation)
     if not result then
         return
     end

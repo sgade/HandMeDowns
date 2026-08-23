@@ -15,12 +15,17 @@
   once per recompute in ScanWarband:
     1. Equipped (any bind type) - always a floor a candidate must beat for
        that character/slot. Never reassigned to anyone else.
-    2. Bag/bank/mail, NOT sendable to a twink (soulbound) - also a floor
-       (matches the old GetBestCompareItem, which ignored bind type), but
-       can never be claimed by another character.
+    2. Bag/bank/mail, NOT sendable to a twink (soulbound, actually already
+       Soulbound despite a sendable-looking bind type, or below Uncommon
+       quality) - also a floor (matches the old GetBestCompareItem, which
+       ignored bind type), but can never be claimed by another character.
     3. Bag/bank/mail, sendable to a twink - the only items ever reassigned;
        up for grabs by any eligible character in the warband, including
        their current owner.
+
+  A bind type like "Bind on Equip" or "Warbound until equipped" only
+  describes what an item *will* do, not whether a specific instance has
+  already bound - see Data.IsActuallySoulbound for how that's resolved.
 
   The expensive part (the full warband scan) happens once per recompute.
   Settling any one (slot-class, target equip location) pair is lazy and
@@ -86,7 +91,8 @@ local WarnedMissingMailAPI = false
 ---(unsendable) table for its slot-class, keyed by its own equip location.
 ---@param character string
 ---@param itemLink ItemInfo?
-function Assignment:_ClassifyItem(character, itemLink)
+---@param itemLocation ItemLocation? # live location, only ever set for the current character's own bag/bank items
+function Assignment:_ClassifyItem(character, itemLink, itemLocation)
     if not itemLink then
         return
     end
@@ -102,7 +108,10 @@ function Assignment:_ClassifyItem(character, itemLink)
     end
 
     local bind = Data.GetItemBind(itemLink)
+    local quality = Data.GetItemQuality(itemLink)
     local sendable = bind and Data.CanItemBeSentToTwink(bind)
+        and Data.IsQualityEligible(quality)
+        and not Data.IsActuallySoulbound(bind, false, itemLocation)
 
     local slotClassKey = Data.SlotClassKey(classID, subclassID)
     local entry = { link = itemLink, character = character }
@@ -128,13 +137,16 @@ function Assignment:ScanWarband()
     self.settledBestCache = {}
 
     for _, character in ipairs(Characters.GetWarbandCharacters()) do
-        Characters.IterateStoredContainerItems(character, function(_, _, _, _, itemLink)
-            self:_ClassifyItem(character, itemLink)
+        local isCurrentCharacter = character == DataStore.ThisCharKey
+
+        Characters.IterateStoredContainerItems(character, function(containerId, _, slotId, _, itemLink)
+            local itemLocation = isCurrentCharacter and Data.GetLiveBagItemLocation(containerId, slotId) or nil
+            self:_ClassifyItem(character, itemLink, itemLocation)
         end)
 
         if DataStore.IterateMails then
             DataStore:IterateMails(character, function(_, _, mailItemLink)
-                self:_ClassifyItem(character, mailItemLink)
+                self:_ClassifyItem(character, mailItemLink) -- no ItemLocation for mail
             end)
         elseif not WarnedMissingMailAPI then
             WarnedMissingMailAPI = true
@@ -297,17 +309,28 @@ end
 ---Finds the destination for a given item: the character who should keep or
 ---receive it, WarbandMeDowns.Assignment.Sell if it's confirmed to be an
 ---upgrade for nobody, or nil if it was never eligible to be sent to a twink
----at all (wrong bind type, not armor/weapon, or not equippable).
+---at all (wrong bind type, already Soulbound, below Uncommon quality, not
+---armor/weapon, or not equippable).
 ---
 ---Already-owned items resolve in O(1) once their slot-class/target group is
 ---settled. Items nobody in the warband owns yet (loot window, vendor,
 ---trade, chat links) fall back to an O(#characters) walk against each
 ---character's already-settled best - no warband rescan needed.
 ---@param itemLink ItemInfo
+---@param itemLocation ItemLocation? # live location of the hovered item, when available (see Data.IsActuallySoulbound)
 ---@return string|table|nil
-function Assignment:GetBestCharacterForItem(itemLink)
+function Assignment:GetBestCharacterForItem(itemLink, itemLocation)
     local bind = Data.GetItemBind(itemLink)
     if not bind or not Data.CanItemBeSentToTwink(bind) then
+        return nil
+    end
+
+    if Data.IsActuallySoulbound(bind, false, itemLocation) then
+        return nil
+    end
+
+    local quality = Data.GetItemQuality(itemLink)
+    if not Data.IsQualityEligible(quality) then
         return nil
     end
 
