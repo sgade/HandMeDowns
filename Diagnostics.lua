@@ -163,6 +163,7 @@ local function PrintUsage()
     WarbandMeDowns:Print("usage:")
     WarbandMeDowns:Print("  /wmd why <item link>  - explain who the engine gives this item to, and why")
     WarbandMeDowns:Print("  /wmd ranks            - print the warband priority order")
+    WarbandMeDowns:Print("  /wmd ilvl [name]      - break down a character's projected item level")
     WarbandMeDowns:Print("  /wmd refresh          - force a full recompute now")
     WarbandMeDowns:Print("(shift-click an item into chat to paste its link)")
 end
@@ -194,6 +195,86 @@ local function PrintRanks()
     end
 end
 
+---Resolves a character name typed by the player to a warband character key,
+---accepting a bare name or "Name@Realm", case-insensitively. Defaults to the
+---current character.
+---@param input string?
+---@return string?
+local function ResolveCharacterArgument(input)
+    if not input or input == "" then
+        return DataStore.ThisCharKey
+    end
+
+    local wanted = input:lower()
+    for _, character in ipairs(Characters.GetWarbandCharacters()) do
+        local server, name = Characters.CharacterServerAndNameFromKey(character)
+        if name and (name:lower() == wanted
+            or (name .. "@" .. (server or "")):lower() == wanted) then
+            return character
+        end
+    end
+
+    return nil
+end
+
+---Prints the per-slot account behind one character's Max iLvl.
+---@param character string
+local function PrintItemLevels(character)
+    Assignment:EnsureFresh()
+
+    local breakdown = WarbandMeDowns.ItemLevel.ExplainMaxItemLevel(character)
+    if not breakdown then
+        WarbandMeDowns:Print("no data for " .. Characters.GetDisplayName(character) .. ".")
+        return
+    end
+
+    WarbandMeDowns:Printf(
+        "%sprojected item level for %s%s",
+        ColorHeading, Characters.GetDisplayName(character), ColorReset
+    )
+
+    for _, row in ipairs(breakdown.rows) do
+        local suffix = ""
+        if row.gain > 0 then
+            suffix = string.format("  %s+%.0f%s", ColorGood, row.gain, ColorReset)
+        end
+        -- An unreadable slot is held at infinity so nothing can "improve" it;
+        -- say so rather than printing inf.
+        local baseline = (row.baseline == math.huge) and "?" or string.format("%.0f", row.baseline)
+        WarbandMeDowns:Printf(
+            "  %s%-10s%s %s -> %.0f%s",
+            ColorMuted, row.name, ColorReset, baseline, row.projected, suffix
+        )
+    end
+
+    if breakdown.twoHanded then
+        WarbandMeDowns:Printf(
+            "  %stwo-handed: the main hand is counted for the off hand too%s",
+            ColorMuted, ColorReset
+        )
+    end
+
+    WarbandMeDowns:Printf(
+        "  equipped %.2f, max %.2f (+%.2f from %d owned item%s)",
+        breakdown.averageItemLevel or 0,
+        breakdown.maxItemLevel or 0,
+        (breakdown.maxItemLevel or 0) - (breakdown.averageItemLevel or 0),
+        breakdown.ownedCount,
+        breakdown.ownedCount == 1 and "" or "s"
+    )
+
+    if breakdown.overallItemLevel then
+        -- Blizzard's own best-gear-you-own number, as a sanity check. Max iLvl
+        -- may legitimately exceed it (it also counts bank and mail, and
+        -- ignores level requirements); far above it on a max-level character
+        -- means a slot is being scored wrong.
+        WarbandMeDowns:Printf(
+            "  %sBlizzard's overall item level for comparison: %.2f%s",
+            ColorMuted, breakdown.overallItemLevel, ColorReset
+        )
+    end
+end
+
 ---AceConsole handler for /wmd.
 ---@param input string
 function WarbandMeDowns:HandleChatCommand(input)
@@ -209,6 +290,13 @@ function WarbandMeDowns:HandleChatCommand(input)
         ExplainAndPrint(itemLink)
     elseif command == "ranks" then
         PrintRanks()
+    elseif command == "ilvl" then
+        local character = ResolveCharacterArgument(rest)
+        if not character then
+            WarbandMeDowns:Print("no warband character named '" .. rest .. "'.")
+            return
+        end
+        PrintItemLevels(character)
     elseif command == "refresh" then
         Assignment:MarkDirty()
         Assignment:EnsureFresh()

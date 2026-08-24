@@ -193,6 +193,30 @@ the itemID branch is effectively dead today. Treat it as a latent hazard that
 a link-format change could reactivate, not as a current source of error, and
 re-measure before relying on either statement.
 
+**Two equipment-slot facts the average depends on.** A **two-handed weapon is
+counted twice**, once for each weapon slot - so a character wielding one has no
+empty off hand as far as the average is concerned. Scoring that slot as empty
+inflated `Max iLvl` by roughly +19 on a character at 295 (an entire extra
+item), which is what `ItemLevel.lua`'s paired weapon-slot handling exists to
+prevent. The snapshot forces this reading: `averageItemLvl` 295.1875 is an
+exact multiple of 1/16 and not of 1/15, so there really are sixteen
+contributions - and if the off hand were one of them at zero, that character's
+fifteen equipped items would have to average 315 while the character sheet
+reads 295.
+
+Second, **`INVSLOT_RANGED` (18) is dead in retail** - a bow or gun equips to the
+main hand, and slot 18 is empty on all 22 characters. `Data.EquipLocToSlotID`
+still maps `INVTYPE_RANGED` / `INVTYPE_RANGEDRIGHT` / `INVTYPE_THROWN` to it,
+which means `Characters.GetEquippedItemsForEquipLocation` hands the assignment
+engine an empty slot for a hunter's bow. `ItemLevel.lua` routes around this
+locally; the engine side is untouched and worth a separate look.
+
+`DataStore:GetAverageItemLevel` returns Blizzard's **overall** item level - best
+gear you own, bags included - as its *second* value. `/wmd ilvl` prints it
+beside the projection as a sanity check. It is not a target to match (the
+projection also counts bank and mail and ignores level requirements) but a
+projection far above it on a max-level character means a slot is scored wrong.
+
 The same snapshot pins down two things `ItemLevel.lua` depends on: every
 stored `averageItemLvl` is an exact multiple of 1/16 (so the divisor is 16),
 and characters with empty slots follow the same rule (so an empty slot

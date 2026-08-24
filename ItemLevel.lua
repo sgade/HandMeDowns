@@ -38,10 +38,28 @@
   zero bare itemIDs. It is documented here (and in docs/DATA_SOURCES.md)
   because it is a live code path that a link-format change could reactivate.
 
-  Two further deliberate approximations, both documented rather than fixed:
-  two-handers are treated as occupying the main hand only (equipping one does
-  not empty the offhand here), and level requirements are ignored entirely -
-  that is the whole point of the "max" column.
+  *** Weapon slots are a pair, because Blizzard scores them as one ***
+
+  A two-hander counts *twice* toward the average - once for each weapon slot -
+  so a character wielding one has no empty offhand as far as the average is
+  concerned. Treating that slot as empty (worth 0, and free for anything in the
+  bags to fill) was worth roughly +19 on a character at 295, since it handed
+  out an entire extra item's worth of gain.
+
+  That the offhand is not simply zero is forced by the stored data: an
+  averageItemLvl of 295.1875 is an exact multiple of 1/16 and not of 1/15, so
+  there really are sixteen contributions - and if the offhand were one of them
+  at zero, that character's fifteen equipped items would have to average 315
+  while their character sheet reads 295. The two-hander supplies the sixteenth.
+
+  So while a two-hander is equipped, the offhand's baseline is the main hand's
+  item level, a better two-hander gains against *both* slots, and nothing may
+  be dropped into the offhand on its own - putting a shield there really means
+  also swapping the main hand, which this model does not attempt. That last
+  rule under-counts rather than over-counts, which is the safe direction here.
+
+  One further deliberate approximation: level requirements are ignored
+  entirely - that is the whole point of the "max" column.
 
 ----------------------------------------------------------------------------]]--
 
@@ -85,6 +103,20 @@ local MultiSlotEquipLocations = {
     INVTYPE_WEAPON = { INVSLOT_MAINHAND, INVSLOT_OFFHAND },
 }
 
+-- Everything that takes up both weapon slots. The ranged locations belong here
+-- too: in retail a bow or a gun equips to the *main hand*, and INVSLOT_RANGED
+-- is vestigial - it is empty on every character in the DataStore snapshot this
+-- was checked against. Data.EquipLocToSlotID still points them at that dead
+-- slot, which is why these are resolved here rather than through it.
+local TwoHandedEquipLocations = {
+    INVTYPE_2HWEAPON = true,
+    INVTYPE_RANGED = true,
+    INVTYPE_RANGEDRIGHT = true,
+    INVTYPE_THROWN = true,
+}
+
+local MainHandOnly = { INVSLOT_MAINHAND }
+
 ---@class WarbandMeDownsProjectedItemLevels
 ---@field maxItemLevel number? # equipping everything they already carry
 ---@field theoreticalItemLevel number? # ...plus what the engine would send them
@@ -123,12 +155,17 @@ end
 ---@param character string
 ---@return table<number, number> slotItemLevels # keyed by inventory slot id
 ---@return boolean unresolved
+---@return boolean twoHanded # the main hand takes up the offhand slot as well
 local function ReadEquippedItemLevels(character)
     local slotItemLevels = {}
     local unresolved = false
+    local mainHandLink = nil
 
     for _, slotId in ipairs(AiLSlots) do
         local link = GetEquippedLink(character, slotId)
+        if slotId == INVSLOT_MAINHAND then
+            mainHandLink = link
+        end
         if not link then
             slotItemLevels[slotId] = 0
         else
@@ -144,7 +181,21 @@ local function ReadEquippedItemLevels(character)
         end
     end
 
-    return slotItemLevels, unresolved
+    -- A two-hander is counted for both weapon slots, so the offhand is not
+    -- empty here even though nothing is in it. GetInstantEquipLocation reads
+    -- the location straight off the link with no cache involved - going
+    -- through C_Item.GetItemInfo instead would answer nil for an uncached
+    -- weapon and silently put the offhand back to zero.
+    local twoHanded = false
+    if mainHandLink and slotItemLevels[INVSLOT_OFFHAND] == 0 then
+        local mainHandLocation = Data.GetInstantEquipLocation(mainHandLink)
+        if mainHandLocation and TwoHandedEquipLocations[mainHandLocation] then
+            twoHanded = true
+            slotItemLevels[INVSLOT_OFFHAND] = slotItemLevels[INVSLOT_MAINHAND]
+        end
+    end
+
+    return slotItemLevels, unresolved, twoHanded
 end
 
 -- *** Candidates
@@ -152,31 +203,36 @@ end
 ---Every slot an item worn at this equip location could occupy, restricted to
 ---the slots that count toward the average.
 ---@param equipLocation string?
----@return number[]?
+---@return number[]? slots
+---@return boolean twoHanded # occupies both weapon slots once equipped
 local function CandidateSlotsFor(equipLocation)
     if not equipLocation or equipLocation == "" then
-        return nil
+        return nil, false
+    end
+
+    if TwoHandedEquipLocations[equipLocation] then
+        return MainHandOnly, true
     end
 
     local multi = MultiSlotEquipLocations[equipLocation]
     if multi then
-        return multi
+        return multi, false
     end
 
     local slotId = Data.EquipLocToSlotID[equipLocation]
     if not slotId then
-        return nil
+        return nil, false
     end
 
     for _, aiLSlotId in ipairs(AiLSlots) do
         if aiLSlotId == slotId then
-            return { slotId }
+            return { slotId }, false
         end
     end
 
-    -- A shirt, a tabard, or the vestigial ranged slot: real equipment, but it
-    -- never moves an item level average.
-    return nil
+    -- A shirt or a tabard: real equipment, but it never moves an item level
+    -- average.
+    return nil, false
 end
 
 ---Turns raw entries into the shape the fill below wants: item level, the
@@ -198,7 +254,7 @@ local function BuildCandidates(character, entries)
         if not itemLevel or not equipLocation then
             unresolved = true
         else
-            local slots = CandidateSlotsFor(equipLocation)
+            local slots, twoHanded = CandidateSlotsFor(equipLocation)
             local classID, subclassID = Data.GetItemClassAndSubclass(entry.link)
 
             if slots and classID and subclassID
@@ -206,6 +262,7 @@ local function BuildCandidates(character, entries)
                 table.insert(candidates, {
                     itemLevel = itemLevel,
                     slots = slots,
+                    twoHanded = twoHanded,
                     link = entry.link,
                 })
             end
@@ -233,9 +290,11 @@ end
 ---@param character string
 ---@param slotItemLevels table<number, number>
 ---@param entries table[]
+---@param twoHandedBaseline boolean # the character currently wields a two-hander
 ---@return number gain
 ---@return boolean unresolved
-local function ProjectGain(character, slotItemLevels, entries)
+---@return table<number, number> projected # resulting per-slot item levels
+local function ProjectGain(character, slotItemLevels, entries, twoHandedBaseline)
     local candidates, unresolved = BuildCandidates(character, entries)
 
     -- Work on a copy: the caller runs this twice against the same equipped
@@ -245,24 +304,48 @@ local function ProjectGain(character, slotItemLevels, entries)
         projected[slotId] = itemLevel
     end
 
+    -- While a two-hander is equipped both weapon slots move together: the
+    -- offhand is only ever written by replacing the two-hander, never on its
+    -- own. See the file header for why filling it alone is not modelled.
+    local paired = twoHandedBaseline
     local gain = 0
 
     for _, candidate in ipairs(candidates) do
-        local weakestSlot, weakestItemLevel = nil, nil
-        for _, slotId in ipairs(candidate.slots) do
-            local current = projected[slotId]
-            if current and (not weakestItemLevel or current < weakestItemLevel) then
-                weakestSlot, weakestItemLevel = slotId, current
+        if candidate.twoHanded then
+            -- Takes both weapon slots and is scored for both, so it has to be
+            -- weighed against what the two of them contribute *together* -
+            -- equipping it means giving up whatever is in the offhand as well.
+            -- Judging it against the main hand alone would let a two-hander
+            -- that is worse than an existing offhand look like an upgrade.
+            local combined = projected[INVSLOT_MAINHAND] + projected[INVSLOT_OFFHAND]
+            local candidateGain = candidate.itemLevel * 2 - combined
+            if candidateGain > 0 then
+                gain = gain + candidateGain
+                projected[INVSLOT_MAINHAND] = candidate.itemLevel
+                projected[INVSLOT_OFFHAND] = candidate.itemLevel
+                paired = true
             end
-        end
+        else
+            local weakestSlot, weakestItemLevel = nil, nil
+            for _, slotId in ipairs(candidate.slots) do
+                -- While a two-hander holds both slots, the offhand can only be
+                -- written by replacing it, never filled on its own.
+                if not (paired and slotId == INVSLOT_OFFHAND) then
+                    local current = projected[slotId]
+                    if current and (not weakestItemLevel or current < weakestItemLevel) then
+                        weakestSlot, weakestItemLevel = slotId, current
+                    end
+                end
+            end
 
-        if weakestSlot and candidate.itemLevel > weakestItemLevel then
-            gain = gain + (candidate.itemLevel - weakestItemLevel)
-            projected[weakestSlot] = candidate.itemLevel
+            if weakestSlot and candidate.itemLevel > weakestItemLevel then
+                gain = gain + (candidate.itemLevel - weakestItemLevel)
+                projected[weakestSlot] = candidate.itemLevel
+            end
         end
     end
 
-    return gain, unresolved
+    return gain, unresolved, projected
 end
 
 -- *** The per-generation cache
@@ -284,6 +367,7 @@ end
 ---@class WarbandMeDownsItemLevelCacheEntry
 ---@field averageItemLevel number? # DataStore's equipped average; nil means never scanned
 ---@field slotItemLevels table<number, number>
+---@field twoHanded boolean # the main hand takes up the offhand slot as well
 ---@field ownedEntries table[]
 ---@field maxItemLevel number?
 ---@field unresolved boolean
@@ -312,12 +396,13 @@ local function EnsureCharacterCache()
             averageItemLevel = nil
         end
 
-        local slotItemLevels, unresolved = ReadEquippedItemLevels(character)
-        local gain, gainUnresolved = ProjectGain(character, slotItemLevels, ownedEntries)
+        local slotItemLevels, unresolved, twoHanded = ReadEquippedItemLevels(character)
+        local gain, gainUnresolved = ProjectGain(character, slotItemLevels, ownedEntries, twoHanded)
 
         CharacterCache[character] = {
             averageItemLevel = averageItemLevel,
             slotItemLevels = slotItemLevels,
+            twoHanded = twoHanded,
             ownedEntries = ownedEntries,
             maxItemLevel = averageItemLevel and (averageItemLevel + gain / AiLSlotCount) or nil,
             unresolved = unresolved or gainUnresolved,
@@ -349,6 +434,70 @@ end
 function ItemLevel.GetMaxItemLevel(character)
     local cached = EnsureCharacterCache()[character]
     return cached and cached.maxItemLevel
+end
+
+-- Names for the diagnostic breakdown below. Deliberately a plain table rather
+-- than Blizzard's INVTYPE_* globals: this is the *slot* being reported, not an
+-- item's equip location, and the two do not line up for weapons.
+local SlotNames = {
+    [INVSLOT_HEAD] = "Head", [INVSLOT_NECK] = "Neck", [INVSLOT_SHOULDER] = "Shoulder",
+    [INVSLOT_CHEST] = "Chest", [INVSLOT_WAIST] = "Waist", [INVSLOT_LEGS] = "Legs",
+    [INVSLOT_FEET] = "Feet", [INVSLOT_WRIST] = "Wrist", [INVSLOT_HAND] = "Hands",
+    [INVSLOT_FINGER1] = "Finger 1", [INVSLOT_FINGER2] = "Finger 2",
+    [INVSLOT_TRINKET1] = "Trinket 1", [INVSLOT_TRINKET2] = "Trinket 2",
+    [INVSLOT_BACK] = "Back", [INVSLOT_MAINHAND] = "Main hand",
+    [INVSLOT_OFFHAND] = "Off hand",
+}
+
+---A per-slot account of how one character's Max iLvl was arrived at, for
+---/wmd ilvl. Read-only: it re-derives from the same cached baseline the column
+---uses rather than forming a second opinion, so what it prints is what the
+---column shows.
+---
+---This exists because the number is otherwise unauditable - a single figure
+---with no way to see which slot produced it, which is exactly how an empty
+---off-hand slot managed to inflate it by an entire item.
+---@param character string
+---@return table? breakdown # { rows = { {slot, name, baseline, projected, gain} }, ... }
+function ItemLevel.ExplainMaxItemLevel(character)
+    local cached = EnsureCharacterCache()[character]
+    if not cached then
+        return nil
+    end
+
+    local _, _, projected = ProjectGain(
+        character, cached.slotItemLevels, cached.ownedEntries, cached.twoHanded)
+
+    local rows = {}
+    local gain = 0
+    for _, slotId in ipairs(AiLSlots) do
+        local baseline = cached.slotItemLevels[slotId]
+        local after = projected[slotId]
+        gain = gain + (after - baseline)
+        table.insert(rows, {
+            slot = slotId,
+            name = SlotNames[slotId] or tostring(slotId),
+            baseline = baseline,
+            projected = after,
+            gain = after - baseline,
+        })
+    end
+
+    local _, overallItemLevel = DataStore:GetAverageItemLevel(character)
+
+    return {
+        rows = rows,
+        twoHanded = cached.twoHanded,
+        ownedCount = #cached.ownedEntries,
+        averageItemLevel = cached.averageItemLevel,
+        maxItemLevel = cached.maxItemLevel,
+        -- Blizzard's own "best gear you own" figure. Not a target to match -
+        -- Max iLvl also counts the bank and mail and ignores level
+        -- requirements - but a Max iLvl far above this on a max-level
+        -- character is the signature of a slot being scored wrong.
+        overallItemLevel = overallItemLevel,
+        gain = gain,
+    }
 end
 
 ---Projected item levels for the whole warband, keyed by character.
@@ -393,7 +542,8 @@ function ItemLevel.GetProjectedItemLevelsForWarband()
                 table.insert(combined, entry)
             end
 
-            local gain, gainUnresolved = ProjectGain(character, cached.slotItemLevels, combined)
+            local gain, gainUnresolved =
+                ProjectGain(character, cached.slotItemLevels, combined, cached.twoHanded)
 
             projections[character] = {
                 maxItemLevel = cached.maxItemLevel,
