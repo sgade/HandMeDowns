@@ -56,7 +56,14 @@
     - Iteration is deterministic. Characters are walked in priority order and
       every candidate bucket is sorted on a stable key, so Lua's `pairs`
       ordering over DataStore's container tables can never leak into the
-      result.
+      result. Priority order itself is a total order down to the character
+      key, since table.sort is not stable and would otherwise let the input
+      order decide between equally-ranked characters.
+
+  Note Recompute() runs the scan *before* it computes the priority order, not
+  after: the order ranks characters on what they own, which only exists once
+  the scan has run. See the comment there for why scanning under a provisional
+  order is safe.
 
 ----------------------------------------------------------------------------]]--
 
@@ -1036,11 +1043,24 @@ function Assignment:Recompute()
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
     Pawn.ClearCaches()
+    WarbandMeDowns.ItemLevel.ClearCaches()
 
-    -- Sort before scanning: ScanWarband walks _sortedCharacters so that the
-    -- scan order is priority order rather than DataStore's `pairs` ordering.
-    self._sortedCharacters = Characters.GetSortedWarbandCharacters()
+    -- Two passes, because the priority order is now derived from the scan.
+    --
+    -- Pass 1 scans under a plain character-key order. That is safe precisely
+    -- because ScanWarband's *output* does not depend on the order it walks:
+    -- _SortBuckets re-sorts every bucket and every entriesByLink list on
+    -- CompareEntries afterwards, so the walk order only ever affects insertion
+    -- order, which is then normalized away. It still has to be a *stable*
+    -- order rather than DataStore's `pairs`, so nothing session-specific can
+    -- leak in before that normalization.
+    self._sortedCharacters = Characters.GetWarbandCharacters()
     self:ScanWarband()
+
+    -- Pass 2 is the real priority order. It has to come after the scan -
+    -- CharacterPriorityComparator ranks on what each character owns - and
+    -- before anything settles, since SettleGroup walks _sortedCharacters.
+    self._sortedCharacters = Characters.GetSortedWarbandCharacters()
     self.dirty = false
 
     --@debug@
@@ -1098,4 +1118,5 @@ function Assignment:Reset()
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
     Pawn.ClearCaches()
+    WarbandMeDowns.ItemLevel.ClearCaches()
 end

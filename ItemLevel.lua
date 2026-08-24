@@ -265,39 +265,91 @@ local function ProjectGain(character, slotItemLevels, entries)
     return gain, unresolved
 end
 
----Both projected averages for one character.
----@param character string
----@param ownedEntries table[] # everything in their own bags, bank and mail
----@param incomingEntries table[] # what the engine claimed for them from elsewhere
----@return WarbandMeDownsProjectedItemLevels
-local function ProjectForCharacter(character, ownedEntries, incomingEntries)
-    local averageItemLevel = DataStore:GetAverageItemLevel(character)
-    if not averageItemLevel or averageItemLevel <= 0 then
-        return { unresolved = false }
+-- *** The per-generation cache
+--
+-- Everything a character's "max" number needs - their equipped baseline and
+-- the items they personally own - comes out of Assignment's scan, and none of
+-- it depends on settlement. That matters because
+-- Characters.CharacterPriorityComparator now reads this: the comparator runs
+-- inside table.sort, O(n log n) times, *while* the priority order is being
+-- decided, so nothing below may call Assignment:EnsureFresh (it would recurse
+-- straight back into Recompute) or Assignment:SettleAllGroups (settlement
+-- walks the very order being computed). It reads the pool exactly as it
+-- currently stands and no more.
+--
+-- The whole warband is built in one pool walk on first request and thrown away
+-- wholesale by ClearCaches() from Assignment:Recompute(), the same lifecycle
+-- as Pawn.ClearCaches and Characters.ClearEligibilityCache.
+
+---@class WarbandMeDownsItemLevelCacheEntry
+---@field averageItemLevel number? # DataStore's equipped average; nil means never scanned
+---@field slotItemLevels table<number, number>
+---@field ownedEntries table[]
+---@field maxItemLevel number?
+---@field unresolved boolean
+
+---@type table<string, WarbandMeDownsItemLevelCacheEntry>?
+local CharacterCache
+
+---Builds the per-character cache for the whole warband, if it isn't built yet.
+---@return table<string, WarbandMeDownsItemLevelCacheEntry>
+local function EnsureCharacterCache()
+    if CharacterCache then
+        return CharacterCache
     end
 
-    local slotItemLevels, unresolved = ReadEquippedItemLevels(character)
+    local owned = {}
+    WarbandMeDowns.Assignment:IterateOwnedEntries(function(entry)
+        owned[entry.character] = owned[entry.character] or {}
+        table.insert(owned[entry.character], entry)
+    end)
 
-    local maxGain, maxUnresolved = ProjectGain(character, slotItemLevels, ownedEntries)
+    CharacterCache = {}
+    for _, character in ipairs(Characters.GetWarbandCharacters()) do
+        local ownedEntries = owned[character] or {}
+        local averageItemLevel = DataStore:GetAverageItemLevel(character)
+        if not averageItemLevel or averageItemLevel <= 0 then
+            averageItemLevel = nil
+        end
 
-    local combined = {}
-    for _, entry in ipairs(ownedEntries) do
-        table.insert(combined, entry)
+        local slotItemLevels, unresolved = ReadEquippedItemLevels(character)
+        local gain, gainUnresolved = ProjectGain(character, slotItemLevels, ownedEntries)
+
+        CharacterCache[character] = {
+            averageItemLevel = averageItemLevel,
+            slotItemLevels = slotItemLevels,
+            ownedEntries = ownedEntries,
+            maxItemLevel = averageItemLevel and (averageItemLevel + gain / AiLSlotCount) or nil,
+            unresolved = unresolved or gainUnresolved,
+        }
     end
-    for _, entry in ipairs(incomingEntries) do
-        table.insert(combined, entry)
-    end
-    local theoreticalGain, theoreticalUnresolved = ProjectGain(character, slotItemLevels, combined)
 
-    return {
-        maxItemLevel = averageItemLevel + maxGain / AiLSlotCount,
-        theoreticalItemLevel = averageItemLevel + theoreticalGain / AiLSlotCount,
-        unresolved = unresolved or maxUnresolved or theoreticalUnresolved
-            or WarbandMeDowns.Assignment:HasUnreadableItems(character),
-    }
+    return CharacterCache
 end
 
--- *** Entry point
+---Drops the per-generation cache. Called by WarbandMeDowns.Assignment's
+---Recompute() and Reset(), alongside the other per-generation memos.
+function ItemLevel.ClearCaches()
+    CharacterCache = nil
+end
+
+-- *** Entry points
+
+---Where this character would land if they equipped everything usable they
+---already hold, or nil if they have never been scanned.
+---
+---This is the warband priority tiebreak (see
+---WarbandMeDowns.Characters.CharacterPriorityComparator), so it is deliberately
+---cheap and deliberately incurious: it reads whatever Assignment has scanned so
+---far and never asks it to refresh or settle. Called before the first scan it
+---simply finds no owned items and answers with the equipped average, which is
+---the behavior the tiebreak had before this became a projection.
+---@param character string
+---@return number?
+function ItemLevel.GetMaxItemLevel(character)
+    local cached = EnsureCharacterCache()[character]
+    return cached and cached.maxItemLevel
+end
 
 ---Projected item levels for the whole warband, keyed by character.
 ---
@@ -314,16 +366,11 @@ function ItemLevel.GetProjectedItemLevelsForWarband()
     -- silently depend on which tooltips the player happened to hover.
     Assignment:SettleAllGroups()
 
-    local owned = {}
     local incoming = {}
-
     Assignment:IterateOwnedEntries(function(entry)
-        owned[entry.character] = owned[entry.character] or {}
-        table.insert(owned[entry.character], entry)
-
         -- An item the engine assigned to the character who already owns it is
-        -- not incoming: it is already counted above, and counting it twice
-        -- would let one physical ring fill both ring slots.
+        -- not incoming: it is already in that character's owned entries, and
+        -- counting it twice would let one physical ring fill both ring slots.
         if entry.claimedBy and entry.claimedBy ~= entry.character then
             incoming[entry.claimedBy] = incoming[entry.claimedBy] or {}
             table.insert(incoming[entry.claimedBy], entry)
@@ -331,12 +378,30 @@ function ItemLevel.GetProjectedItemLevelsForWarband()
     end)
 
     local projections = {}
-    for _, character in ipairs(Characters.GetWarbandCharacters()) do
-        projections[character] = ProjectForCharacter(
-            character,
-            owned[character] or {},
-            incoming[character] or {}
-        )
+    for character, cached in pairs(EnsureCharacterCache()) do
+        if not cached.averageItemLevel then
+            projections[character] = { unresolved = false }
+        else
+            -- The equipped baseline and the owned gain are already cached; only
+            -- the incoming items are new, and they are projected against the
+            -- same baseline rather than on top of the max result.
+            local combined = {}
+            for _, entry in ipairs(cached.ownedEntries) do
+                table.insert(combined, entry)
+            end
+            for _, entry in ipairs(incoming[character] or {}) do
+                table.insert(combined, entry)
+            end
+
+            local gain, gainUnresolved = ProjectGain(character, cached.slotItemLevels, combined)
+
+            projections[character] = {
+                maxItemLevel = cached.maxItemLevel,
+                theoreticalItemLevel = cached.averageItemLevel + gain / AiLSlotCount,
+                unresolved = cached.unresolved or gainUnresolved
+                    or Assignment:HasUnreadableItems(character),
+            }
+        end
     end
 
     return projections

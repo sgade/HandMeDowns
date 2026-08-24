@@ -313,11 +313,18 @@ end
 
 -- *** Warband enumeration and priority
 
----Every character on the account - the current one included.
+---Every character on the account - the current one included - in character-key
+---order.
 ---
 ---DataStore.ThisAccount: usually "Default"
 ---DataStore:GetCharacters(): keys of the form "Default.Server.Name"
 ---assuming "this account" is the warband
+---
+---Sorted rather than left in `pairs` order because that order differs between
+---sessions, and two things downstream would inherit the difference: it is the
+---bootstrap order WarbandMeDowns.Assignment:Recompute scans under, and it is
+---the input table.sort sees below - and table.sort is not stable, so the input
+---order decides how equally-ranked characters come out.
 ---@return string[]
 function Characters.GetWarbandCharacters()
     local characters = {}
@@ -326,11 +333,25 @@ function Characters.GetWarbandCharacters()
             table.insert(characters, character)
         end
     end
+    table.sort(characters)
     return characters
 end
 
----The warband priority order: current level first, then equipped average
----item level.
+---The warband priority order: current level first, then *projected* item
+---level - where the character would land having equipped everything usable
+---they already carry, not what they happen to be wearing.
+---
+---Ranking on equipped item level under-rated exactly the character this addon
+---exists to help: someone sitting on a pile of upgrades they have not put on
+---looks weak, ranks low, and is therefore sent even more gear. The projection
+---(WarbandMeDowns.ItemLevel.GetMaxItemLevel, the "Max iLvl" column in the
+---settings table) closes that hole.
+---
+---Note it is deliberately the *max* projection and not the theoretical one:
+---the theoretical number is derived from the engine's claims, which are
+---decided by walking this very order, so using it here would be circular -
+---and self-reinforcing, since gear assigned to a character would raise their
+---priority and so assign them more gear.
 ---
 ---EXTENSION POINT: this is the one place warband priority is decided.
 ---Replace this function reference to change the ordering later (e.g. a
@@ -347,9 +368,27 @@ function Characters.CharacterPriorityComparator(left, right)
         return leftLevel > rightLevel
     end
 
-    local leftItemLevel = DataStore:GetAverageItemLevel(left) or 0
-    local rightItemLevel = DataStore:GetAverageItemLevel(right) or 0
-    return leftItemLevel > rightItemLevel
+    -- Resolved here rather than as a file-scope local: ItemLevel.lua loads
+    -- after this file (it needs the assignment engine, which is later still) -
+    -- see WarbandMeDowns.toc.
+    --
+    -- GetMaxItemLevel is nil for a character DataStore has never recorded an
+    -- average for; that is not "item level 0", it is "no idea", and falling
+    -- back to the raw average keeps such a character ranked where they were.
+    local ItemLevel = WarbandMeDowns.ItemLevel
+    local leftItemLevel = ItemLevel.GetMaxItemLevel(left)
+        or DataStore:GetAverageItemLevel(left) or 0
+    local rightItemLevel = ItemLevel.GetMaxItemLevel(right)
+        or DataStore:GetAverageItemLevel(right) or 0
+    if leftItemLevel ~= rightItemLevel then
+        return leftItemLevel > rightItemLevel
+    end
+
+    -- A total order, not a preference: table.sort is not stable, so without a
+    -- final tiebreak two characters equal on both keys come out in an order
+    -- decided by the input, and the recommendation would move between sessions
+    -- for no reason. See the Assignment.lua header on why that matters.
+    return left < right
 end
 
 ---The warband, ranked by WarbandMeDowns.Characters.CharacterPriorityComparator.
