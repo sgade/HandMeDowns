@@ -30,5 +30,6 @@ Characters.lua
 Settings.lua
 Pawn.lua
 Assignment.lua
+ItemLevel.lua
 Diagnostics.lua
 Tooltip.lua

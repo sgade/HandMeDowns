@@ -177,6 +177,30 @@ simply not a candidate. Verified against DataStore_Containers 2026.08.x.
 last time that character opened a mailbox.** The settings page shows the
 per-module "last scanned" times for exactly this reason.
 
+**Stored equipped items *can* be a bare itemID rather than a link.**
+DataStore_Inventory's `ScanInventorySlot` only stores the full item link when
+`IsEnchanted(link)` is true (a pattern match on the link's enchant/gem
+fields); otherwise it stores just `tonumber(link:match("item:(%d+)"))`.
+`C_Item.GetDetailedItemLevelInfo` accepts an itemID happily but then answers
+with the item's *base* item level, with no bonus-ID upgrade track applied - so
+such a slot would read several tiers below what the character actually wears.
+
+Measured against this account's `DataStore_Inventory.lua` SavedVariables
+(2026-08-24, 22 characters, 352 item-level-relevant equipment slots): **zero**
+bare itemIDs, all full links. `IsEnchanted`'s pattern
+(`item:%d+:0:0:0:0:0:0:%d+:%d+:0:0`) does not match the modern link format, so
+the itemID branch is effectively dead today. Treat it as a latent hazard that
+a link-format change could reactivate, not as a current source of error, and
+re-measure before relying on either statement.
+
+The same snapshot pins down two things `ItemLevel.lua` depends on: every
+stored `averageItemLvl` is an exact multiple of 1/16 (so the divisor is 16),
+and characters with empty slots follow the same rule (so an empty slot
+contributes zero rather than shrinking the divisor). Slots 4 (shirt) and 19
+(tabard) are populated but excluded from it; slot 18 (ranged) is never
+populated at all in retail.
+
+
 Neither of these makes the answer *inconsistent* between characters - both are
 account-wide stored state, identical whoever is logged in - they just make it
 incomplete. Consistency is a separate concern, handled in `Assignment.lua`;

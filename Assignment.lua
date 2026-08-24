@@ -810,6 +810,114 @@ function Assignment:GetBestCharacterForItem(itemLink, itemLocation)
     return self.Sell
 end
 
+-- *** Bulk settlement
+--
+-- The tooltip path only ever needs the one group the hovered item belongs to,
+-- so SettleGroup is lazy. Anything that wants to know what the engine hands
+-- *every* character - the settings page's projected item levels - needs the
+-- claims from every group instead, which is what SettleAllGroups forces.
+
+---Every (slot-class, target equip location) pair that has at least one
+---sendable candidate, in a stable order.
+---
+---Order matters and is not cosmetic: claims are cross-group stateful (an
+---ambidextrous one-hander claimed while settling INVTYPE_WEAPON is gone by the
+---time INVTYPE_WEAPONMAINHAND is settled), so settling in `pairs` order would
+---make the result differ between sessions. Sorting on the pair key pins it
+---down.
+---@return table[] # { slotClassKey, equipLoc, classID, subclassID }
+function Assignment:_SettleableGroups()
+    local groups = {}
+
+    for slotClassKey, buckets in pairs(self.pool) do
+        for equipLoc, entries in pairs(buckets) do
+            local first = entries[1]
+            if first then
+                local classID, subclassID = Data.GetItemClassAndSubclass(first.link)
+                if classID and subclassID then
+                    table.insert(groups, {
+                        slotClassKey = slotClassKey,
+                        equipLoc = equipLoc,
+                        classID = classID,
+                        subclassID = subclassID,
+                    })
+                end
+            end
+        end
+    end
+
+    table.sort(groups, function(left, right)
+        if left.slotClassKey ~= right.slotClassKey then
+            return left.slotClassKey < right.slotClassKey
+        end
+        return left.equipLoc < right.equipLoc
+    end)
+
+    return groups
+end
+
+---Settles every group that has a candidate in it, so `entry.claimedBy` is
+---populated across the whole pool. Idempotent within a generation - SettleGroup
+---no-ops on an already-settled pair - and deterministic, so calling this does
+---not change any answer a tooltip would otherwise have given; it only makes
+---later tooltip answers independent of the order groups happened to be
+---hovered in.
+function Assignment:SettleAllGroups()
+    for _, group in ipairs(self:_SettleableGroups()) do
+        self:SettleGroup(group.slotClassKey, group.equipLoc, group.classID, group.subclassID)
+    end
+end
+
+---Every bag/bank/mail entry the last scan produced - sendable pool entries
+---first, then unsendable floorExtra ones - in a deterministic order, so
+---callers outside this module never have to know the bucket table shapes.
+---Equipped items are not entries and are therefore not visited.
+---@param callback fun(entry: table, isSendable: boolean)
+function Assignment:IterateOwnedEntries(callback)
+    for _, bucketsBySlotClass in ipairs({ self.pool, self.floorExtra }) do
+        local isSendable = bucketsBySlotClass == self.pool
+
+        local slotClassKeys = {}
+        for slotClassKey in pairs(bucketsBySlotClass) do
+            table.insert(slotClassKeys, slotClassKey)
+        end
+        table.sort(slotClassKeys)
+
+        for _, slotClassKey in ipairs(slotClassKeys) do
+            local buckets = bucketsBySlotClass[slotClassKey]
+
+            local equipLocs = {}
+            for equipLoc in pairs(buckets) do
+                table.insert(equipLocs, equipLoc)
+            end
+            table.sort(equipLocs)
+
+            for _, equipLoc in ipairs(equipLocs) do
+                for _, entry in ipairs(buckets[equipLoc]) do
+                    callback(entry, isSendable)
+                end
+            end
+        end
+    end
+end
+
+---Whether this character owns at least one bag/bank/mail item the client
+---could not read during the last scan, so anything derived from their
+---inventory is necessarily incomplete.
+---@param character string
+---@return boolean
+function Assignment:HasUnreadableItems(character)
+    for _, byLocation in pairs(self.unresolvedOwners) do
+        for _, owners in pairs(byLocation) do
+            if owners[character] then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 -- *** Explaining a result
 --
 -- Read-only re-derivation of one decision, for the /wmd why command. It

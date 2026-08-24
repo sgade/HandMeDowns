@@ -23,11 +23,19 @@ local PANEL_PADDING = 12
 local ROW_HEIGHT = 22
 local SECTION_HEADER_HEIGHT = 24
 
-local ColumnWidths = { rank = 28, name = 130, realm = 90, level = 44, itemLevel = 50, bagsBank = 80, mail = 70 }
+-- Nine columns have to fit the width the Settings window gives a canvas
+-- panel, so these are tighter than they would otherwise need to be: 528px of
+-- columns plus eight 4px gaps = 560px.
+local ColumnWidths = {
+    rank = 24, name = 110, realm = 74, level = 40,
+    itemLevel = 44, maxItemLevel = 52, theoreticalItemLevel = 60,
+    bagsBank = 66, mail = 58,
+}
 
 local ColorGold = { 1, 0.82, 0 }
 local ColorMuted = { 0.6, 0.6, 0.6 }
 local ColorBody = { 0.85, 0.85, 0.85 }
+local ColorActionable = { 0.45, 0.75, 0.45 }
 
 ---@type Frame?
 local Panel
@@ -86,13 +94,23 @@ end
 
 -- *** Row data
 
+---@param itemLevel number?
+---@return string
+local function FormatItemLevel(itemLevel)
+    if not itemLevel or itemLevel <= 0 then
+        return "—"
+    end
+    return string.format("%.0f", itemLevel)
+end
+
 ---Formats one warband character's row for the priority table, tolerant of
 ---DataStore fields that are nil because the character hasn't been scanned
 ---this session.
 ---@param character string
 ---@param rank number
+---@param projection WarbandMeDownsProjectedItemLevels? # see WarbandMeDowns.ItemLevel
 ---@return table
-local function GetRowData(character, rank)
+local function GetRowData(character, rank, projection)
     local server, name = Characters.CharacterServerAndNameFromKey(character)
 
     local level = DataStore:GetCharacterLevel(character)
@@ -100,12 +118,23 @@ local function GetRowData(character, rank)
 
     local classSuccess, _, classToken = pcall(DataStore.GetCharacterClass, DataStore, character)
 
+    local maxItemLevel = projection and projection.maxItemLevel
+    local theoreticalItemLevel = projection and projection.theoreticalItemLevel
+
     return {
         rank = rank,
         name = name or character,
         realm = (server and server ~= "") and server or "—",
         levelText = level and tostring(level) or "—",
-        itemLevelText = (itemLevel and itemLevel > 0) and string.format("%.0f", itemLevel) or "—",
+        itemLevelText = FormatItemLevel(itemLevel),
+        maxItemLevelText = FormatItemLevel(maxItemLevel),
+        theoreticalItemLevelText = FormatItemLevel(theoreticalItemLevel),
+        -- Rendered green only when the projection is actually an improvement,
+        -- so a row where nothing is waiting to be equipped stays quiet.
+        maxIsUpgrade = (maxItemLevel and itemLevel and maxItemLevel - itemLevel >= 0.5) or false,
+        theoreticalIsUpgrade = (theoreticalItemLevel and maxItemLevel
+            and theoreticalItemLevel - maxItemLevel >= 0.5) or false,
+        projectionUnresolved = (projection and projection.unresolved) or false,
         isCurrent = character == DataStore.ThisCharKey,
         classToken = classSuccess and classToken or nil,
         bagsBankText = FormatElapsed(GetModuleLastUpdate("DataStore_Containers", character)),
@@ -134,6 +163,21 @@ local function CreateColumn(parent, relativeTo, width)
     return text
 end
 
+---Colors one of the two projected item level cells. Rows are pooled, so this
+---always sets a color rather than leaving the previous row's one behind.
+---@param text FontString
+---@param unresolved boolean
+---@param isUpgrade boolean
+local function SetProjectionColor(text, unresolved, isUpgrade)
+    if unresolved then
+        text:SetTextColor(unpack(ColorMuted))
+    elseif isUpgrade then
+        text:SetTextColor(unpack(ColorActionable))
+    else
+        text:SetTextColor(1, 1, 1)
+    end
+end
+
 ---Lazily builds a row's column fontstrings on first use, then always
 ---overwrites their values - rows are pooled and reused by the ScrollView, so
 ---nothing here may assume a clean frame.
@@ -146,7 +190,9 @@ local function InitializeRow(row, data)
         row.realmText = CreateColumn(row, row.nameText, ColumnWidths.realm)
         row.levelText = CreateColumn(row, row.realmText, ColumnWidths.level)
         row.itemLevelText = CreateColumn(row, row.levelText, ColumnWidths.itemLevel)
-        row.bagsBankText = CreateColumn(row, row.itemLevelText, ColumnWidths.bagsBank)
+        row.maxItemLevelText = CreateColumn(row, row.itemLevelText, ColumnWidths.maxItemLevel)
+        row.theoreticalItemLevelText = CreateColumn(row, row.maxItemLevelText, ColumnWidths.theoreticalItemLevel)
+        row.bagsBankText = CreateColumn(row, row.theoreticalItemLevelText, ColumnWidths.bagsBank)
         row.mailText = CreateColumn(row, row.bagsBankText, ColumnWidths.mail)
     end
 
@@ -167,6 +213,14 @@ local function InitializeRow(row, data)
     row.levelText:SetText(data.levelText)
     row.itemLevelText:SetText(data.itemLevelText)
 
+    -- Muted whenever some of this character's item data still isn't cached:
+    -- the numbers are the best answer available right now, not the final one.
+    row.maxItemLevelText:SetText(data.maxItemLevelText)
+    SetProjectionColor(row.maxItemLevelText, data.projectionUnresolved, data.maxIsUpgrade)
+
+    row.theoreticalItemLevelText:SetText(data.theoreticalItemLevelText)
+    SetProjectionColor(row.theoreticalItemLevelText, data.projectionUnresolved, data.theoreticalIsUpgrade)
+
     row.bagsBankText:SetText(data.bagsBankText)
     row.bagsBankText:SetTextColor(unpack(ColorMuted))
 
@@ -186,7 +240,9 @@ local function CreateHeaderRow(parent)
     local realm = CreateColumn(header, name, ColumnWidths.realm)
     local level = CreateColumn(header, realm, ColumnWidths.level)
     local itemLevel = CreateColumn(header, level, ColumnWidths.itemLevel)
-    local bagsBank = CreateColumn(header, itemLevel, ColumnWidths.bagsBank)
+    local maxItemLevel = CreateColumn(header, itemLevel, ColumnWidths.maxItemLevel)
+    local theoreticalItemLevel = CreateColumn(header, maxItemLevel, ColumnWidths.theoreticalItemLevel)
+    local bagsBank = CreateColumn(header, theoreticalItemLevel, ColumnWidths.bagsBank)
     local mail = CreateColumn(header, bagsBank, ColumnWidths.mail)
 
     rank:SetText("#")
@@ -194,10 +250,14 @@ local function CreateHeaderRow(parent)
     realm:SetText("Realm")
     level:SetText("Level")
     itemLevel:SetText("iLvl")
+    maxItemLevel:SetText("Max iLvl")
+    theoreticalItemLevel:SetText("Theo. iLvl")
     bagsBank:SetText("Bags/Bank")
     mail:SetText("Mail")
 
-    for _, column in ipairs({ rank, name, realm, level, itemLevel, bagsBank, mail }) do
+    for _, column in ipairs({
+        rank, name, realm, level, itemLevel, maxItemLevel, theoreticalItemLevel, bagsBank, mail,
+    }) do
         column:SetFontObject("GameFontNormalSmall")
         column:SetTextColor(unpack(ColorMuted))
     end
@@ -234,8 +294,20 @@ local function BuildPanel()
         "never changes this ranking. Use /wmd why <item link> to see how a particular item was assigned."
     )
 
+    local columnLegend = Panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    columnLegend:SetPoint("TOPLEFT", explanation, "BOTTOMLEFT", 0, -8)
+    columnLegend:SetPoint("RIGHT", Panel, "RIGHT", -PANEL_PADDING, 0)
+    columnLegend:SetJustifyH("LEFT")
+    columnLegend:SetWordWrap(true)
+    columnLegend:SetText(
+        "iLvl is what a character has equipped right now. Max iLvl is where they would land if they " ..
+        "equipped everything usable already sitting in their bags, bank and mail - level requirements " ..
+        "ignored. Theo. iLvl additionally counts the gear this addon would send them from the rest of " ..
+        "the warband. Greyed-out values mean some of that item data hasn't loaded yet."
+    )
+
     local divider = Panel:CreateTexture(nil, "ARTWORK")
-    divider:SetPoint("TOPLEFT", explanation, "BOTTOMLEFT", 0, -12)
+    divider:SetPoint("TOPLEFT", columnLegend, "BOTTOMLEFT", 0, -12)
     divider:SetPoint("RIGHT", Panel, "RIGHT", -PANEL_PADDING, 0)
     divider:SetHeight(1)
     divider:SetColorTexture(0.3, 0.3, 0.3, 0.6)
@@ -280,9 +352,25 @@ function SettingsPage.RefreshTable()
         return
     end
 
+    -- Resolved lazily, not as a file-scope local: WarbandMeDowns.ItemLevel is
+    -- loaded after this file (it needs the assignment engine, which is also
+    -- loaded later) - see WarbandMeDowns.toc. Failing to project must not take
+    -- the whole panel down with it, so a failure just leaves the two projected
+    -- columns empty.
+    local projections = {}
+    local ItemLevel = WarbandMeDowns.ItemLevel
+    if ItemLevel then
+        local success, result = pcall(ItemLevel.GetProjectedItemLevelsForWarband)
+        if success and result then
+            projections = result
+        else
+            WarbandMeDowns:Print("warn: could not project item levels: " .. tostring(result))
+        end
+    end
+
     local dataProvider = CreateDataProvider()
     for rank, character in ipairs(Characters.GetSortedWarbandCharacters()) do
-        dataProvider:Insert(GetRowData(character, rank))
+        dataProvider:Insert(GetRowData(character, rank, projections[character]))
     end
 
     Panel.scrollView:SetDataProvider(dataProvider)
