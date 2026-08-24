@@ -23,13 +23,25 @@ local PANEL_PADDING = 12
 local ROW_HEIGHT = 22
 local SECTION_HEADER_HEIGHT = 24
 
--- Nine columns have to fit the width the Settings window gives a canvas
--- panel, so these are tighter than they would otherwise need to be: 528px of
--- columns plus eight 4px gaps = 560px.
-local ColumnWidths = {
-    rank = 24, name = 110, realm = 74, level = 40,
-    itemLevel = 44, maxItemLevel = 52, theoreticalItemLevel = 60,
-    bagsBank = 66, mail = 58,
+-- The table's columns, in display order. One list rather than a widths table
+-- plus two creation chains plus a styling list: those four used to be kept in
+-- sync by hand, and adding a column meant editing all of them.
+--
+-- `key` names both the row frame's fontstring (`key .. "Text"`) and the field
+-- GetRowData puts the cell's text in, so a column is added here and nowhere
+-- else. Nine of them have to fit the width the Settings window gives a canvas
+-- panel, so the widths are tighter than they would otherwise need to be: 528px
+-- of columns plus eight 4px gaps = 560px.
+local Columns = {
+    { key = "rank", header = "#", width = 24 },
+    { key = "name", header = "Character", width = 110 },
+    { key = "realm", header = "Realm", width = 74 },
+    { key = "level", header = "Level", width = 40 },
+    { key = "itemLevel", header = "iLvl", width = 44 },
+    { key = "maxItemLevel", header = "Max iLvl", width = 52 },
+    { key = "theoreticalItemLevel", header = "Theo. iLvl", width = 60 },
+    { key = "bagsBank", header = "Bags/Bank", width = 66 },
+    { key = "mail", header = "Mail", width = 58 },
 }
 
 local ColorGold = { 1, 0.82, 0 }
@@ -103,42 +115,38 @@ local function FormatItemLevel(itemLevel)
     return string.format("%.0f", itemLevel)
 end
 
----Formats one warband character's row for the priority table, tolerant of
----DataStore fields that are nil because the character hasn't been scanned
----this session.
----@param character string
----@param rank number
----@param projection WarbandMeDownsProjectedItemLevels? # see WarbandMeDowns.ItemLevel
+---Formats one warband character's row from the shared ranking record, adding
+---the two things only this panel shows: the class colour and the per-module
+---last-scanned times.
+---
+---Every field named `<column key>Text` is what that column renders; see
+---`Columns` above.
+---@param entry WarbandMeDownsRankedCharacter # see WarbandMeDowns.Characters.GetWarbandRanking
 ---@return table
-local function GetRowData(character, rank, projection)
-    local server, name = Characters.CharacterServerAndNameFromKey(character)
+local function GetRowData(entry)
+    local server = Characters.CharacterServerAndNameFromKey(entry.character)
 
-    local level = DataStore:GetCharacterLevel(character)
-    local itemLevel = DataStore:GetAverageItemLevel(character)
-
-    local classSuccess, _, classToken = pcall(DataStore.GetCharacterClass, DataStore, character)
-
-    local maxItemLevel = projection and projection.maxItemLevel
-    local theoreticalItemLevel = projection and projection.theoreticalItemLevel
+    local classSuccess, _, classToken = pcall(
+        DataStore.GetCharacterClass, DataStore, entry.character)
 
     return {
-        rank = rank,
-        name = name or character,
-        realm = (server and server ~= "") and server or "—",
-        levelText = level and tostring(level) or "—",
-        itemLevelText = FormatItemLevel(itemLevel),
-        maxItemLevelText = FormatItemLevel(maxItemLevel),
-        theoreticalItemLevelText = FormatItemLevel(theoreticalItemLevel),
+        rankText = tostring(entry.rank),
+        nameText = entry.displayName .. (entry.isCurrent and " (You)" or ""),
+        realmText = (server and server ~= "") and server or "—",
+        levelText = entry.level and tostring(entry.level) or "—",
+        itemLevelText = FormatItemLevel(entry.itemLevel),
+        maxItemLevelText = FormatItemLevel(entry.maxItemLevel),
+        theoreticalItemLevelText = FormatItemLevel(entry.theoreticalItemLevel),
         -- Rendered green only when the projection is actually an improvement,
         -- so a row where nothing is waiting to be equipped stays quiet.
-        maxIsUpgrade = (maxItemLevel and itemLevel and maxItemLevel - itemLevel >= 0.5) or false,
-        theoreticalIsUpgrade = (theoreticalItemLevel and maxItemLevel
-            and theoreticalItemLevel - maxItemLevel >= 0.5) or false,
-        projectionUnresolved = (projection and projection.unresolved) or false,
-        isCurrent = character == DataStore.ThisCharKey,
+        maxIsUpgrade = (entry.maxItemLevel and entry.itemLevel
+            and entry.maxItemLevel - entry.itemLevel >= 0.5) or false,
+        theoreticalIsUpgrade = (entry.theoreticalItemLevel and entry.maxItemLevel
+            and entry.theoreticalItemLevel - entry.maxItemLevel >= 0.5) or false,
+        projectionUnresolved = entry.unresolved,
         classToken = classSuccess and classToken or nil,
-        bagsBankText = FormatElapsed(GetModuleLastUpdate("DataStore_Containers", character)),
-        mailText = FormatElapsed(GetModuleLastUpdate("DataStore_Mails", character)),
+        bagsBankText = FormatElapsed(GetModuleLastUpdate("DataStore_Containers", entry.character)),
+        mailText = FormatElapsed(GetModuleLastUpdate("DataStore_Mails", entry.character)),
     }
 end
 
@@ -184,22 +192,23 @@ end
 ---@param row Frame
 ---@param data table
 local function InitializeRow(row, data)
-    if not row.rankText then
-        row.rankText = CreateColumn(row, nil, ColumnWidths.rank)
-        row.nameText = CreateColumn(row, row.rankText, ColumnWidths.name)
-        row.realmText = CreateColumn(row, row.nameText, ColumnWidths.realm)
-        row.levelText = CreateColumn(row, row.realmText, ColumnWidths.level)
-        row.itemLevelText = CreateColumn(row, row.levelText, ColumnWidths.itemLevel)
-        row.maxItemLevelText = CreateColumn(row, row.itemLevelText, ColumnWidths.maxItemLevel)
-        row.theoreticalItemLevelText = CreateColumn(row, row.maxItemLevelText, ColumnWidths.theoreticalItemLevel)
-        row.bagsBankText = CreateColumn(row, row.theoreticalItemLevelText, ColumnWidths.bagsBank)
-        row.mailText = CreateColumn(row, row.bagsBankText, ColumnWidths.mail)
+    if not row[Columns[1].key .. "Text"] then
+        local previous = nil
+        for _, column in ipairs(Columns) do
+            local text = CreateColumn(row, previous, column.width)
+            row[column.key .. "Text"] = text
+            previous = text
+        end
     end
 
-    row.rankText:SetText(tostring(data.rank))
-    row.rankText:SetTextColor(unpack(ColorMuted))
+    for _, column in ipairs(Columns) do
+        local field = column.key .. "Text"
+        row[field]:SetText(data[field] or "")
+        -- Unconditional: rows are pooled, so a cell that skipped setting its
+        -- colour would keep the previous row's.
+        row[field]:SetTextColor(unpack(ColorMuted))
+    end
 
-    row.nameText:SetText(data.name .. (data.isCurrent and " (You)" or ""))
     local classColor = data.classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[data.classToken]
     if classColor then
         row.nameText:SetTextColor(classColor.r, classColor.g, classColor.b)
@@ -207,59 +216,30 @@ local function InitializeRow(row, data)
         row.nameText:SetTextColor(1, 1, 1)
     end
 
-    row.realmText:SetText(data.realm)
-    row.realmText:SetTextColor(unpack(ColorMuted))
-
-    row.levelText:SetText(data.levelText)
-    row.itemLevelText:SetText(data.itemLevelText)
+    row.levelText:SetTextColor(1, 1, 1)
+    row.itemLevelText:SetTextColor(1, 1, 1)
 
     -- Muted whenever some of this character's item data still isn't cached:
     -- the numbers are the best answer available right now, not the final one.
-    row.maxItemLevelText:SetText(data.maxItemLevelText)
     SetProjectionColor(row.maxItemLevelText, data.projectionUnresolved, data.maxIsUpgrade)
-
-    row.theoreticalItemLevelText:SetText(data.theoreticalItemLevelText)
     SetProjectionColor(row.theoreticalItemLevelText, data.projectionUnresolved, data.theoreticalIsUpgrade)
-
-    row.bagsBankText:SetText(data.bagsBankText)
-    row.bagsBankText:SetTextColor(unpack(ColorMuted))
-
-    row.mailText:SetText(data.mailText)
-    row.mailText:SetTextColor(unpack(ColorMuted))
 end
 
----Builds a header row mirroring InitializeRow's column layout exactly.
+---Builds a header row from the same `Columns` list InitializeRow lays out, so
+---headers and cells cannot drift apart.
 ---@param parent Frame
 ---@return Frame
 local function CreateHeaderRow(parent)
     local header = CreateFrame("Frame", nil, parent)
     header:SetHeight(SECTION_HEADER_HEIGHT)
 
-    local rank = CreateColumn(header, nil, ColumnWidths.rank)
-    local name = CreateColumn(header, rank, ColumnWidths.name)
-    local realm = CreateColumn(header, name, ColumnWidths.realm)
-    local level = CreateColumn(header, realm, ColumnWidths.level)
-    local itemLevel = CreateColumn(header, level, ColumnWidths.itemLevel)
-    local maxItemLevel = CreateColumn(header, itemLevel, ColumnWidths.maxItemLevel)
-    local theoreticalItemLevel = CreateColumn(header, maxItemLevel, ColumnWidths.theoreticalItemLevel)
-    local bagsBank = CreateColumn(header, theoreticalItemLevel, ColumnWidths.bagsBank)
-    local mail = CreateColumn(header, bagsBank, ColumnWidths.mail)
-
-    rank:SetText("#")
-    name:SetText("Character")
-    realm:SetText("Realm")
-    level:SetText("Level")
-    itemLevel:SetText("iLvl")
-    maxItemLevel:SetText("Max iLvl")
-    theoreticalItemLevel:SetText("Theo. iLvl")
-    bagsBank:SetText("Bags/Bank")
-    mail:SetText("Mail")
-
-    for _, column in ipairs({
-        rank, name, realm, level, itemLevel, maxItemLevel, theoreticalItemLevel, bagsBank, mail,
-    }) do
-        column:SetFontObject("GameFontNormalSmall")
-        column:SetTextColor(unpack(ColorMuted))
+    local previous = nil
+    for _, column in ipairs(Columns) do
+        local text = CreateColumn(header, previous, column.width)
+        text:SetText(column.header)
+        text:SetFontObject("GameFontNormalSmall")
+        text:SetTextColor(unpack(ColorMuted))
+        previous = text
     end
 
     return header
@@ -343,7 +323,7 @@ end
 
 -- *** Refresh
 
----Rebuilds the priority table from Characters.GetSortedWarbandCharacters().
+---Rebuilds the priority table from Characters.GetWarbandRanking().
 ---Called whenever the settings page is shown, since DataStore state (levels,
 ---item levels, which characters have been scanned) can change between
 ---visits. Recomputing on every show is cheap - a small warband and a
@@ -353,25 +333,19 @@ function SettingsPage.RefreshTable()
         return
     end
 
-    -- Resolved lazily, not as a file-scope local: WarbandMeDowns.ItemLevel is
-    -- loaded after this file (it needs the assignment engine, which is also
-    -- loaded later) - see WarbandMeDowns.toc. Failing to project must not take
-    -- the whole panel down with it, so a failure just leaves the two projected
-    -- columns empty.
-    local projections = {}
-    local ItemLevel = WarbandMeDowns.ItemLevel
-    if ItemLevel then
-        local success, result = pcall(ItemLevel.GetProjectedItemLevelsForWarband)
-        if success and result then
-            projections = result
-        else
-            WarbandMeDowns:Print("warn: could not project item levels: " .. tostring(result))
-        end
+    -- The one ranking the whole addon shares - same order and same numbers
+    -- /wmd ranks prints, and the order the engine actually settled under.
+    -- Failing to build it must not take the panel down with it, so a failure
+    -- leaves an empty table rather than erroring out of OnShow.
+    local success, ranking = pcall(Characters.GetWarbandRanking)
+    if not success then
+        WarbandMeDowns:Print("warn: could not rank the warband: " .. tostring(ranking))
+        ranking = {}
     end
 
     local dataProvider = CreateDataProvider()
-    for rank, character in ipairs(Characters.GetSortedWarbandCharacters()) do
-        dataProvider:Insert(GetRowData(character, rank, projections[character]))
+    for _, entry in ipairs(ranking) do
+        dataProvider:Insert(GetRowData(entry))
     end
 
     Panel.scrollView:SetDataProvider(dataProvider)

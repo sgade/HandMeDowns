@@ -168,27 +168,28 @@ local function PrintUsage()
     WarbandMeDowns:Print("(shift-click an item into chat to paste its link)")
 end
 
+---Prints the warband priority order, reading the same ranking record the
+---settings table renders (Characters.GetWarbandRanking) so the two can never
+---disagree about the order or the numbers. Spec and Pawn scale are added on top
+---here; they are diagnostic-only and the panel has no column for them.
 local function PrintRanks()
-    Assignment:EnsureFresh()
-
     WarbandMeDowns:Print(ColorHeading .. "warband priority order" .. ColorReset)
-    for rank, character in ipairs(Characters.GetSortedWarbandCharacters()) do
-        local level = DataStore:GetCharacterLevel(character) or 0
-        local itemLevel = DataStore:GetAverageItemLevel(character) or 0
-        -- The max projection, not the equipped average, is what the order is
-        -- actually sorted on - print both so this command can explain a rank
-        -- that looks wrong against the equipped numbers.
-        local maxItemLevel = WarbandMeDowns.ItemLevel.GetMaxItemLevel(character) or 0
-        local specIndex = Characters.GetKnownSpecIndex(character)
-        local scaleName = WarbandMeDowns.Pawn.GetPawnScaleNameForCharacter(character)
 
+    for _, entry in ipairs(Characters.GetWarbandRanking()) do
+        local specIndex = Characters.GetKnownSpecIndex(entry.character)
+        local scaleName = WarbandMeDowns.Pawn.GetPawnScaleNameForCharacter(entry.character)
+
+        -- The max projection, not the equipped average, is what the order is
+        -- actually sorted on - print all three so this command can explain a
+        -- rank that looks wrong against the equipped numbers.
         WarbandMeDowns:Printf(
-            "  %s%2d%s %-18s level %-3d ilvl %-6.1f max %-6.1f spec %-4s %s",
-            ColorMuted, rank, ColorReset,
-            Characters.GetDisplayName(character) .. (character == DataStore.ThisCharKey and " (you)" or ""),
-            level,
-            itemLevel,
-            maxItemLevel,
+            "  %s%2d%s %-18s level %-3d ilvl %-6.1f max %-6.1f theo %-6.1f spec %-4s %s",
+            ColorMuted, entry.rank, ColorReset,
+            entry.displayName .. (entry.isCurrent and " (you)" or ""),
+            entry.level or 0,
+            entry.itemLevel or 0,
+            entry.maxItemLevel or 0,
+            entry.theoreticalItemLevel or 0,
             specIndex and tostring(specIndex) or "?",
             scaleName or (ColorWarn .. "no Pawn scale" .. ColorReset)
         )

@@ -249,6 +249,20 @@ local function CompareEntries(left, right)
     return tostring(left.link) < tostring(right.link)
 end
 
+---A table's keys in sorted order. Every walk over the bucket tables goes
+---through this: `pairs` order over them is arbitrary and differs between
+---sessions, and the whole engine rests on that never reaching a result.
+---@param source table
+---@return string[]
+local function SortedKeys(source)
+    local keys = {}
+    for key in pairs(source) do
+        table.insert(keys, key)
+    end
+    table.sort(keys)
+    return keys
+end
+
 ---Buckets one bag/bank/mail item into the pool (sendable) or floorExtra
 ---(unsendable) table for its slot-class, keyed by its own equip location.
 ---@param character string
@@ -830,15 +844,17 @@ end
 ---Order matters and is not cosmetic: claims are cross-group stateful (an
 ---ambidextrous one-hander claimed while settling INVTYPE_WEAPON is gone by the
 ---time INVTYPE_WEAPONMAINHAND is settled), so settling in `pairs` order would
----make the result differ between sessions. Sorting on the pair key pins it
----down.
+---make the result differ between sessions. Walking the keys in sorted order
+---pins it down.
 ---@return table[] # { slotClassKey, equipLoc, classID, subclassID }
 function Assignment:_SettleableGroups()
     local groups = {}
 
-    for slotClassKey, buckets in pairs(self.pool) do
-        for equipLoc, entries in pairs(buckets) do
-            local first = entries[1]
+    for _, slotClassKey in ipairs(SortedKeys(self.pool)) do
+        local buckets = self.pool[slotClassKey]
+
+        for _, equipLoc in ipairs(SortedKeys(buckets)) do
+            local first = buckets[equipLoc][1]
             if first then
                 local classID, subclassID = Data.GetItemClassAndSubclass(first.link)
                 if classID and subclassID then
@@ -852,13 +868,6 @@ function Assignment:_SettleableGroups()
             end
         end
     end
-
-    table.sort(groups, function(left, right)
-        if left.slotClassKey ~= right.slotClassKey then
-            return left.slotClassKey < right.slotClassKey
-        end
-        return left.equipLoc < right.equipLoc
-    end)
 
     return groups
 end
@@ -884,22 +893,10 @@ function Assignment:IterateOwnedEntries(callback)
     for _, bucketsBySlotClass in ipairs({ self.pool, self.floorExtra }) do
         local isSendable = bucketsBySlotClass == self.pool
 
-        local slotClassKeys = {}
-        for slotClassKey in pairs(bucketsBySlotClass) do
-            table.insert(slotClassKeys, slotClassKey)
-        end
-        table.sort(slotClassKeys)
-
-        for _, slotClassKey in ipairs(slotClassKeys) do
+        for _, slotClassKey in ipairs(SortedKeys(bucketsBySlotClass)) do
             local buckets = bucketsBySlotClass[slotClassKey]
 
-            local equipLocs = {}
-            for equipLoc in pairs(buckets) do
-                table.insert(equipLocs, equipLoc)
-            end
-            table.sort(equipLocs)
-
-            for _, equipLoc in ipairs(equipLocs) do
+            for _, equipLoc in ipairs(SortedKeys(buckets)) do
                 for _, entry in ipairs(buckets[equipLoc]) do
                     callback(entry, isSendable)
                 end
@@ -1035,11 +1032,27 @@ function Assignment:EnsureFresh()
     end
 end
 
+---*The* warband order: the one the engine settled under this generation.
+---
+---Everything that displays a ranking - the settings table, /wmd ranks - must
+---read it from here rather than sorting for itself, so what is shown is always
+---the order the recommendations were computed with. Characters.GetSortedWarbandCharacters
+---does the sorting and is called only by Recompute, once per generation.
+---
+---This is the engine's own array, not a copy - iterate it, never sort or
+---otherwise mutate it, or the generation's settlement order goes with it.
+---@return string[]
+function Assignment:GetRankedCharacters()
+    self:EnsureFresh()
+    return self._sortedCharacters
+end
+
 function Assignment:Recompute()
     --@debug@
     local debugRecomputeStartTime = debugprofilestop()
     --@end-debug@
 
+    Characters.ClearWarbandCache()
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
     Pawn.ClearCaches()
@@ -1115,6 +1128,7 @@ function Assignment:Reset()
     self._sortedCharacters = {}
     self.dirty = true
 
+    Characters.ClearWarbandCache()
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
     Pawn.ClearCaches()

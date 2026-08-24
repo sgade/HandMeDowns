@@ -288,27 +288,53 @@ function Characters.CharacterServerAndNameFromKey(key)
     return server, name
 end
 
+---@type string[]?
+local WarbandCharacterCache
+
+---@type table<string, string>?
+local DisplayNameCache
+
 ---A character's display name for user-facing text: just the character name
 ---if it's unique across the warband, or "Name@Realm" if another warband
 ---character shares the same name on a different realm.
+---
+---Resolved for the whole warband at once and memoized. This used to rescan
+---every character on every call, which is a per-row cost in both /wmd ranks
+---and Assignment:ExplainItem's table - O(n^2) for one printed table, and worse
+---once GetWarbandCharacters started sorting.
 ---@param character string
 ---@return string
 function Characters.GetDisplayName(character)
-    local server, name = Characters.CharacterServerAndNameFromKey(character)
-    if not name then
-        return character
-    end
-
-    for _, other in ipairs(Characters.GetWarbandCharacters()) do
-        if other ~= character then
+    if not DisplayNameCache then
+        local countsByName = {}
+        for _, other in ipairs(Characters.GetWarbandCharacters()) do
             local _, otherName = Characters.CharacterServerAndNameFromKey(other)
-            if otherName == name then
-                return name .. "@" .. (server or "?")
+            if otherName then
+                countsByName[otherName] = (countsByName[otherName] or 0) + 1
+            end
+        end
+
+        DisplayNameCache = {}
+        for _, other in ipairs(Characters.GetWarbandCharacters()) do
+            local otherServer, otherName = Characters.CharacterServerAndNameFromKey(other)
+            if not otherName then
+                DisplayNameCache[other] = other
+            elseif countsByName[otherName] > 1 then
+                DisplayNameCache[other] = otherName .. "@" .. (otherServer or "?")
+            else
+                DisplayNameCache[other] = otherName
             end
         end
     end
 
-    return name
+    if DisplayNameCache[character] then
+        return DisplayNameCache[character]
+    end
+
+    -- Not in the warband snapshot (a key from a stale cache, say): fall back to
+    -- the bare name rather than inventing a collision suffix for it.
+    local _, name = Characters.CharacterServerAndNameFromKey(character)
+    return name or character
 end
 
 -- *** Warband enumeration and priority
@@ -325,8 +351,16 @@ end
 ---bootstrap order WarbandMeDowns.Assignment:Recompute scans under, and it is
 ---the input table.sort sees below - and table.sort is not stable, so the input
 ---order decides how equally-ranked characters come out.
+---Memoized for the generation, since it is read from several places per
+---refresh and each rebuild allocates and sorts. A character created mid-session
+---therefore only appears after the next recompute - the same staleness window
+---the scanned pool and the projections already have.
 ---@return string[]
 function Characters.GetWarbandCharacters()
+    if WarbandCharacterCache then
+        return WarbandCharacterCache
+    end
+
     local characters = {}
     for realmName in pairs(DataStore:GetRealms(DataStore.ThisAccount)) do
         for _, character in pairs(DataStore:GetCharacters(realmName, DataStore.ThisAccount)) do
@@ -334,7 +368,17 @@ function Characters.GetWarbandCharacters()
         end
     end
     table.sort(characters)
+
+    WarbandCharacterCache = characters
     return characters
+end
+
+---Drops the memoized warband roster and display names. Called by
+---WarbandMeDowns.Assignment's Recompute() and Reset(), alongside the other
+---per-generation memos.
+function Characters.ClearWarbandCache()
+    WarbandCharacterCache = nil
+    DisplayNameCache = nil
 end
 
 ---The warband priority order: current level first, then *projected* item
@@ -394,9 +438,69 @@ end
 ---The warband, ranked by WarbandMeDowns.Characters.CharacterPriorityComparator.
 ---The current character is not special-cased: it's ranked like any other
 ---and wins only if it comes first among the characters that need an item.
+---
+---This performs the sort. Consumers wanting *the* warband order must call
+---WarbandMeDowns.Assignment:GetRankedCharacters() instead, which hands back the
+---order the engine actually settled under; only Assignment:Recompute calls this
+---one, so the sort happens exactly once per generation. Re-sorting elsewhere
+---would let the displayed order drift from the order the recommendations were
+---computed with.
 ---@return string[]
 function Characters.GetSortedWarbandCharacters()
-    local characters = Characters.GetWarbandCharacters()
+    -- A copy: the memoized roster must not be reordered under its other readers.
+    local characters = {}
+    for _, character in ipairs(Characters.GetWarbandCharacters()) do
+        table.insert(characters, character)
+    end
+
     table.sort(characters, Characters.CharacterPriorityComparator)
     return characters
+end
+
+---@class WarbandMeDownsRankedCharacter
+---@field rank number
+---@field character string
+---@field displayName string
+---@field isCurrent boolean
+---@field level number?
+---@field itemLevel number? # currently equipped average
+---@field maxItemLevel number? # equipping everything they already carry
+---@field theoreticalItemLevel number? # ...plus what the engine would send them
+---@field unresolved boolean # some item involved could not be read yet
+
+---The warband in priority order, with every number the settings table and
+---/wmd ranks display, resolved once.
+---
+---Both of those used to walk their own freshly-sorted list and read DataStore
+---for themselves, which meant three independent sorts per refresh and two
+---different answers for a missing item level (0 in the console, an em dash in
+---the panel). The order here is the engine's own - whatever it settled under is
+---what gets displayed - so the table can no longer show a ranking the
+---recommendations were not computed with.
+---@return WarbandMeDownsRankedCharacter[]
+function Characters.GetWarbandRanking()
+    -- Resolved here rather than as file-scope locals: both modules load after
+    -- this file - see WarbandMeDowns.toc.
+    local Assignment = WarbandMeDowns.Assignment
+    local ItemLevel = WarbandMeDowns.ItemLevel
+
+    local projections = ItemLevel.GetProjectedItemLevelsForWarband()
+
+    local ranking = {}
+    for rank, character in ipairs(Assignment:GetRankedCharacters()) do
+        local projection = projections[character]
+        table.insert(ranking, {
+            rank = rank,
+            character = character,
+            displayName = Characters.GetDisplayName(character),
+            isCurrent = character == DataStore.ThisCharKey,
+            level = DataStore:GetCharacterLevel(character),
+            itemLevel = DataStore:GetAverageItemLevel(character),
+            maxItemLevel = projection and projection.maxItemLevel,
+            theoreticalItemLevel = projection and projection.theoreticalItemLevel,
+            unresolved = (projection and projection.unresolved) or false,
+        })
+    end
+
+    return ranking
 end
