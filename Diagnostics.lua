@@ -30,25 +30,6 @@ local ColorGood = "|cff40d060"
 local ColorWarn = "|cffff8040"
 local ColorReset = "|r"
 
----Pulls a usable item link out of whatever the player typed. A shift-clicked
----link arrives complete (colour codes and all) and works as-is with every
----C_Item function; a bare item ID or plain name is passed through for
----C_Item.GetItemInfo to resolve.
----@param input string
----@return string?
-local function ParseItemArgument(input)
-    if not input then
-        return nil
-    end
-
-    local trimmed = input:match("^%s*(.-)%s*$")
-    if trimmed == "" then
-        return nil
-    end
-
-    return trimmed
-end
-
 ---Pads to `width` first and colours afterwards: colour escapes count toward
 ---string.format's field width but take up no space on screen, so colouring
 ---before padding silently breaks the column alignment.
@@ -277,13 +258,21 @@ local function PrintItemLevels(character)
 end
 
 ---AceConsole handler for /wmd.
+---
+---Arguments come from AceConsole:GetArgs rather than a hand-rolled split
+---because a shift-clicked item link is not one word: GetArgs walks past
+---`|H...|h...|h` hyperlinks and `|T...|t` textures and hands the whole link
+---back as a single argument. It also trims for us, and returns nil - not an
+---empty string - for an argument that isn't there.
 ---@param input string
 function WarbandMeDowns:HandleChatCommand(input)
-    local command, rest = (input or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    input = input or ""
+
+    local command, argumentPosition = self:GetArgs(input, 1)
     command = (command or ""):lower()
 
     if command == "why" then
-        local itemLink = ParseItemArgument(rest)
+        local itemLink = self:GetArgs(input, 1, argumentPosition)
         if not itemLink then
             WarbandMeDowns:Print("usage: /wmd why <item link>")
             return
@@ -292,9 +281,10 @@ function WarbandMeDowns:HandleChatCommand(input)
     elseif command == "ranks" then
         PrintRanks()
     elseif command == "ilvl" then
-        local character = ResolveCharacterArgument(rest)
+        local name = self:GetArgs(input, 1, argumentPosition)
+        local character = ResolveCharacterArgument(name)
         if not character then
-            WarbandMeDowns:Print("no warband character named '" .. rest .. "'.")
+            WarbandMeDowns:Print("no warband character named '" .. tostring(name) .. "'.")
             return
         end
         PrintItemLevels(character)
