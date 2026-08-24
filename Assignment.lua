@@ -96,7 +96,7 @@ Assignment.settledBestCache = {}  -- settledBestCache[slotClassKey][targetEquipL
 Assignment.unresolvedCache = {}   -- unresolvedCache[slotClassKey][targetEquipLoc][character] = true
 Assignment.unresolvedOwners = {}  -- unresolvedOwners[slotClassKey][equipLoc][character] = true (owns an unreadable item competing there)
 Assignment._sortedCharacters = {}
-Assignment._debounceToken = 0
+Assignment._debounceTimer = nil
 
 -- *** Scoring
 --
@@ -1087,25 +1087,27 @@ end
 
 ---Marks the engine dirty and arms a debounced background recompute attempt.
 ---Safe to call repeatedly in a burst (e.g. several bag-update events in a
----row): only the most recently armed timer will actually try to recompute.
+---row): each call cancels the previous timer, so only the last one fires.
+---
+---Note the timer methods are called on the addon object rather than on this
+---one: AceTimer is mixed into WarbandMeDowns by NewAddon, and Assignment is a
+---plain namespace table, not an AceAddon module. Cancelling on disable is
+---handled for us through AceTimer's OnEmbedDisable - see OnDisable in
+---Tooltip.lua.
 function Assignment:MarkDirty()
     self.dirty = true
-    self._debounceToken = self._debounceToken + 1
-    local token = self._debounceToken
 
-    if C_Timer and C_Timer.After then
-        C_Timer.After(0.5, function()
-            self:TryBackgroundRecompute(token)
-        end)
+    if self._debounceTimer then
+        WarbandMeDowns:CancelTimer(self._debounceTimer)
     end
+
+    self._debounceTimer = WarbandMeDowns:ScheduleTimer(function()
+        self._debounceTimer = nil
+        self:TryBackgroundRecompute()
+    end, 0.5)
 end
 
----@param token number
-function Assignment:TryBackgroundRecompute(token)
-    if token ~= self._debounceToken then
-        return -- superseded by a newer invalidation
-    end
-
+function Assignment:TryBackgroundRecompute()
     if not self.dirty then
         return
     end
@@ -1126,6 +1128,7 @@ function Assignment:Reset()
     self.unresolvedCache = {}
     self.unresolvedOwners = {}
     self._sortedCharacters = {}
+    self._debounceTimer = nil
     self.dirty = true
 
     Characters.ClearWarbandCache()
