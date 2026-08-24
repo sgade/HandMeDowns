@@ -78,8 +78,8 @@ end
 ---cache. Called by WarbandMeDowns.Assignment:Recompute()/Reset() so a spec
 ---change or an item shuffling around the warband is always picked up.
 function Pawn.ClearCaches()
-    WarbandMeDowns.Util.clearTable(PawnScaleNameCache)
-    WarbandMeDowns.Util.clearTable(PawnItemValueCache)
+    wipe(PawnScaleNameCache)
+    wipe(PawnItemValueCache)
 end
 
 ---Scores an item against a named Pawn scale, using Pawn's own item parsing

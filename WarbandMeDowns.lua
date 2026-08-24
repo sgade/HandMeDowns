@@ -22,8 +22,7 @@
 
 -- *** Bootstrap
 --
--- This file only creates the addon object and the small set of generic
--- helpers shared across every other file. WoW addon files are separate Lua
+-- This file only creates the addon object. WoW addon files are separate Lua
 -- chunks - `local`s never cross files - so anything that needs to be shared
 -- lives as a namespaced field on this table instead (WarbandMeDowns.Data,
 -- WarbandMeDowns.Characters, WarbandMeDowns.Pawn, WarbandMeDowns.Assignment). See
@@ -31,19 +30,6 @@
 
 WarbandMeDowns = LibStub("AceAddon-3.0"):NewAddon("WarbandMeDowns", "AceConsole-3.0")
 
-WarbandMeDowns.Util = {}
-
-function WarbandMeDowns.Util.arrayContains(array, element)
-    for _, value in ipairs(array) do
-        if value == element then
-            return true
-        end
-    end
-    return false
-end
-
-function WarbandMeDowns.Util.clearTable(table)
-    for key in pairs(table) do
-        table[key] = nil
-    end
-end
+-- There is deliberately no WarbandMeDowns.Util here. It used to hold
+-- arrayContains and clearTable, which are Blizzard's own `tContains` and
+-- `wipe` globals under different names.

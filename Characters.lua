@@ -95,7 +95,7 @@ end
 ---Clears the per-character active-spec memo. Called by
 ---WarbandMeDowns.Assignment:Recompute() so a spec change is always picked up.
 function Characters.ClearSpecCache()
-    WarbandMeDowns.Util.clearTable(KnownSpecIndexCache)
+    wipe(KnownSpecIndexCache)
 end
 
 ---Checks whether a weapon or shield is one the character's specialization
@@ -198,7 +198,7 @@ function Characters.CanCharacterEquipItemClass(character, classID, subclassID)
 
         local _, class = DataStore:GetCharacterClass(character)
 
-        if not WarbandMeDowns.Util.arrayContains(classesThatCanUseItem, class) then
+        if not tContains(classesThatCanUseItem, class) then
             return false
         end
 
@@ -213,7 +213,7 @@ end
 ---by WarbandMeDowns.Assignment:Recompute() whenever the warband might have
 ---changed (e.g. a spec change).
 function Characters.ClearEligibilityCache()
-    WarbandMeDowns.Util.clearTable(EligibilityCache)
+    wipe(EligibilityCache)
 end
 
 ---@param character string

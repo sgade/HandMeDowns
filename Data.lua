@@ -450,7 +450,10 @@ function Data.CanItemBeSentToTwink(bindType)
         Enum.ItemBind.ToBnetAccount,
         Enum.ItemBind.ToBnetAccountUntilEquipped
     }
-    return WarbandMeDowns.Util.arrayContains(relevantForTwinks, bindType)
+    -- Coerced, not returned raw: Blizzard's tContains has historically answered
+    -- 1/nil rather than true/false, and this function's result is stored and
+    -- returned rather than only branched on.
+    return not not tContains(relevantForTwinks, bindType)
 end
 
 local MinRecommendableQuality = (Enum and Enum.ItemQuality and Enum.ItemQuality.Uncommon) or LE_ITEM_QUALITY_UNCOMMON or 2
@@ -494,7 +497,7 @@ local ConvertsToSoulboundOnEquip = {
 ---@param itemLocation ItemLocation?
 ---@return boolean
 function Data.IsActuallySoulbound(bindType, isEquipped, itemLocation)
-    if not WarbandMeDowns.Util.arrayContains(ConvertsToSoulboundOnEquip, bindType) then
+    if not tContains(ConvertsToSoulboundOnEquip, bindType) then
         return false
     end
 
