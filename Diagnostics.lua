@@ -289,9 +289,11 @@ function WarbandMeDowns:HandleChatCommand(input)
         end
         PrintItemLevels(character)
     elseif command == "refresh" then
-        Assignment:MarkDirty()
-        Assignment:EnsureFresh()
-        WarbandMeDowns:Print("recomputed.")
+        -- Straight to Recompute rather than MarkDirty + EnsureFresh: the point
+        -- of the command is to do the work now, and this is what tells it the
+        -- recompute was asked for, so it reports the timing even in a packaged
+        -- build.
+        Assignment:Recompute(true)
     else
         PrintUsage()
     end

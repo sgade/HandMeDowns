@@ -1047,10 +1047,13 @@ function Assignment:GetRankedCharacters()
     return self._sortedCharacters
 end
 
-function Assignment:Recompute()
-    --@debug@
-    local debugRecomputeStartTime = debugprofilestop()
-    --@end-debug@
+---@param userRequested boolean? # true when a player action asked for this
+---directly (/wmd refresh), as opposed to an invalidation event triggering it
+function Assignment:Recompute(userRequested)
+    -- Not inside an @debug@ block: the elapsed time is reported to the player
+    -- too when they asked for the recompute themselves. debugprofilestop is a
+    -- normal retail API, present in every build despite the name.
+    local startTime = debugprofilestop()
 
     Characters.ClearWarbandCache()
     Characters.ClearEligibilityCache()
@@ -1076,13 +1079,23 @@ function Assignment:Recompute()
     self._sortedCharacters = Characters.GetSortedWarbandCharacters()
     self.dirty = false
 
+    -- A recompute the player asked for always reports back - it is the only
+    -- feedback /wmd refresh gives. The automatic ones, which fire on every bag
+    -- update and equipment change, would be chat spam, so they are announced
+    -- only in a development build: the packager strips the block below out of
+    -- everything it builds, leaving `announce` as `userRequested` alone.
+    local announce = userRequested
     --@debug@
-    WarbandMeDowns:Printf(
-        "Recomputed warband with %d characters in %.3fms.",
-        #(self._sortedCharacters),
-        debugprofilestop() - debugRecomputeStartTime
-    )
+    announce = true
     --@end-debug@
+
+    if announce then
+        WarbandMeDowns:Printf(
+            "recomputed warband with %d characters in %.3fms.",
+            #(self._sortedCharacters),
+            debugprofilestop() - startTime
+        )
+    end
 end
 
 ---Marks the engine dirty and arms a debounced background recompute attempt.
