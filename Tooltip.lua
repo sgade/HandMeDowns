@@ -8,16 +8,9 @@
 
 local Characters = WarbandMeDowns.Characters
 
-local CacheInvalidationFrame
-
 -- *** Lifecycle
 
 function WarbandMeDowns:OnInitialize()
-    CacheInvalidationFrame = CreateFrame("Frame")
-    CacheInvalidationFrame:SetScript("OnEvent", function()
-        WarbandMeDowns.Assignment:MarkDirty()
-    end)
-
     WarbandMeDowns.Settings:Initialize()
     WarbandMeDowns.Diagnostics:Initialize()
 end
@@ -32,10 +25,9 @@ function WarbandMeDowns:OnEnable()
 end
 
 function WarbandMeDowns:OnDisable()
-    if CacheInvalidationFrame then
-        CacheInvalidationFrame:UnregisterAllEvents()
-    end
-
+    -- The events registered below and any pending debounce timer are dropped
+    -- for us: AceAddon calls OnEmbedDisable on every embedded library, and
+    -- AceEvent's unregisters everything while AceTimer's cancels everything.
     WarbandMeDowns.Assignment:Reset()
 
     --@debug@
@@ -71,11 +63,14 @@ function WarbandMeDowns:HookItemTooltips()
     end
 end
 
-function WarbandMeDowns:RegisterCacheInvalidationEvents()
-    if not CacheInvalidationFrame then
-        return
-    end
+---Any of these means something the engine reads may have changed. They all
+---land on the same debounced MarkDirty - which event it was never matters,
+---only that the answer might be stale now.
+function WarbandMeDowns:OnCacheInvalidated()
+    WarbandMeDowns.Assignment:MarkDirty()
+end
 
+function WarbandMeDowns:RegisterCacheInvalidationEvents()
     local events = {
         "BAG_UPDATE_DELAYED",
         "BANKFRAME_CLOSED",
@@ -92,8 +87,12 @@ function WarbandMeDowns:RegisterCacheInvalidationEvents()
         "PLAYERREAGENTBANKSLOTS_CHANGED",
     }
 
+    -- Still wrapped in pcall despite going through AceEvent: AceEvent routes to
+    -- the same frame:RegisterEvent underneath, so an event name this client
+    -- does not know still raises. One unsupported event must not take the rest
+    -- of the list with it.
     for _, eventName in ipairs(events) do
-        pcall(CacheInvalidationFrame.RegisterEvent, CacheInvalidationFrame, eventName)
+        pcall(self.RegisterEvent, self, eventName, "OnCacheInvalidated")
     end
 end
 

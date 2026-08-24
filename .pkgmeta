@@ -17,3 +17,4 @@ optional-dependencies:
 embedded-libraries:
   - libstub
   - ace3
+  - callbackhandler
