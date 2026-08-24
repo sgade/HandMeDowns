@@ -21,6 +21,7 @@ local ArmorSubclass = {
     Leather = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Leather) or LE_ITEM_ARMOR_LEATHER or 2,
     Mail = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Mail) or LE_ITEM_ARMOR_MAIL or 3,
     Plate = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Plate) or LE_ITEM_ARMOR_PLATE or 4,
+    Cosmetic = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Cosmetic) or 5,
     Shield = (Enum and Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Shield) or LE_ITEM_ARMOR_SHIELD or 6,
 }
 Data.ArmorSubclass = ArmorSubclass
@@ -38,6 +39,7 @@ local WeaponSubclass = {
     Warglaive = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Warglaive) or LE_ITEM_WEAPON_WARGLAIVE or 9,
     Staff = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Staff) or LE_ITEM_WEAPON_STAFF or 10,
     Fist = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Fist) or LE_ITEM_WEAPON_UNARMED or 13,
+    Generic = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Generic) or 14,
     Dagger = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Dagger) or LE_ITEM_WEAPON_DAGGER or 15,
     Crossbow = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Crossbow) or LE_ITEM_WEAPON_CROSSBOW or 18,
     Wand = (Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Wand) or LE_ITEM_WEAPON_WAND or 19,
@@ -68,6 +70,21 @@ SetArmorSubclassClasses(ArmorSubclass.Mail, {"HUNTER", "SHAMAN", "EVOKER"})
 SetArmorSubclassClasses(ArmorSubclass.Plate, {"WARRIOR", "PALADIN", "DEATHKNIGHT"})
 SetArmorSubclassClasses(ArmorSubclass.Shield, {"WARRIOR", "PALADIN", "SHAMAN"})
 SetArmorSubclassClasses(ArmorSubclass.Generic, {"WARRIOR", "PALADIN", "DEATHKNIGHT", "HUNTER", "SHAMAN", "EVOKER", "ROGUE", "MONK", "DRUID", "DEMONHUNTER", "PRIEST", "MAGE", "WARLOCK"})
+
+-- Equippable, but never gear.
+--
+-- Cosmetic armor is transmog-only, and the Weapon "Generic" subclass is the
+-- Miscellaneous auction category - mining picks, blacksmith hammers and other
+-- equippable oddities. Both are genuine Armor/Weapon items with an equip
+-- location, so they reach the eligibility check like anything else; no class
+-- should ever be handed one as an upgrade.
+--
+-- Listed explicitly rather than left out of the tables: a *missing* subclass
+-- means "this addon has not been taught about it yet" and warns accordingly,
+-- which is a different statement from "nobody wears this for stats".
+local NoClassWantsThis = {}
+SetArmorSubclassClasses(ArmorSubclass.Cosmetic, NoClassWantsThis)
+SetWeaponSubclassClasses(WeaponSubclass.Generic, NoClassWantsThis)
 
 SetWeaponSubclassClasses(WeaponSubclass.Axe, {"WARRIOR", "PALADIN", "HUNTER", "ROGUE", "SHAMAN", "MONK", "DEMONHUNTER", "DEATHKNIGHT", "EVOKER"})
 SetWeaponSubclassClasses(WeaponSubclass.Axe2H, {"WARRIOR", "PALADIN", "HUNTER", "DEATHKNIGHT", "EVOKER"})

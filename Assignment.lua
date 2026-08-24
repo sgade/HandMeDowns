@@ -513,6 +513,31 @@ local function UnionMatchingBuckets(bucketsBySlotClass, slotClassKey, targetEqui
     return result
 end
 
+---The entries this character could actually wear.
+---
+---Necessary because a slot-class is coarser than equippability: Data.SlotClassKey
+---collapses *all* armor into one key, so the candidate union for a plate chest
+---also contains the cloth, leather and cosmetic chests sitting in the warband's
+---bags. SettleGroup's group-level check only vets the representative subclass,
+---which is not the same question as "can this character wear this particular
+---item".
+---
+---Without this a plate wearer claims the higher-item-level cloth chest, and the
+---plate upgrade they should have received is left unclaimed and reported as
+---vendor trash - a wrong answer, not just a wasted comparison.
+---@param character string
+---@param entries table[]
+---@return table[]
+local function EquippableEntries(character, entries)
+    local result = {}
+    for _, entry in ipairs(entries) do
+        if Characters.CanCharacterEquipItem(character, entry.link) then
+            table.insert(result, entry)
+        end
+    end
+    return result
+end
+
 ---Every item one character's decision in this group depends on, so the scorer
 ---can commit to a basis that covers all of them at once.
 ---@param character string
@@ -630,13 +655,21 @@ function Assignment:SettleGroup(slotClassKey, targetEquipLoc, classID, subclassI
             settledBest[character] = self.Ineligible
         else
             local equipped, slotCount = Characters.GetEquippedItemsForEquipLocation(character, targetEquipLoc)
+
+            -- Narrowed to what this character can actually wear before anything
+            -- is scored or claimed - see EquippableEntries. The entry tables are
+            -- the same objects, so claims still propagate to every other group
+            -- the entry could have satisfied.
+            local ownCandidates = EquippableEntries(character, candidates)
+            local ownFloorExtra = EquippableEntries(character, floorExtra)
+
             local scorer = self:_BuildScorerForCharacter(
                 character,
-                CollectRelevantItems(character, equipped, slotCount, floorExtra, candidates)
+                CollectRelevantItems(character, equipped, slotCount, ownFloorExtra, ownCandidates)
             )
 
-            local floor = self:_ReplaceableFloorItem(character, slotClassKey, floorExtra, scorer, equipped, slotCount)
-            local claimed = self:_ClaimBestCandidate(character, candidates, floor, scorer)
+            local floor = self:_ReplaceableFloorItem(character, slotClassKey, ownFloorExtra, scorer, equipped, slotCount)
+            local claimed = self:_ClaimBestCandidate(character, ownCandidates, floor, scorer)
             if claimed then
                 claimed.claimedBy = character
                 claimed.claimedOverFloor = floor
