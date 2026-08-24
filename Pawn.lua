@@ -29,27 +29,6 @@ local PawnScaleNameCache = {}
 local PawnScaleUnknown = {}
 local PawnItemValueCache = {} -- PawnItemValueCache[scaleName][itemLink] = number | false
 
----Finds the local (1-4) spec index Pawn expects, matching Blizzard's
----GetSpecializationInfoForClassID convention. Data.SpecsByClass is already
----ordered to match that convention (see Data.lua's SetClassSpecs calls).
----@param class string
----@param specID number
----@return number?
-local function GetPawnLocalSpecIndex(class, specID)
-    local specIDs = Data.SpecsByClass[class]
-    if not specIDs then
-        return nil
-    end
-
-    for index, thisSpecID in ipairs(specIDs) do
-        if thisSpecID == specID then
-            return index
-        end
-    end
-
-    return nil
-end
-
 ---Resolves the name of the Pawn scale to use for a character, if Pawn is
 ---installed and a scale can be determined. Never throws; returns nil for
 ---any reason Pawn's data isn't usable (not installed, spec unknown, a
@@ -71,13 +50,15 @@ function Pawn.GetPawnScaleNameForCharacter(character)
 
         local _, class = DataStore:GetCharacterClass(character)
         local classID = class and Data.ClassID[class]
-        local specID = Characters.GetKnownSpecID(character)
-        if not classID or not specID then
-            return nil
-        end
-
-        local localSpecIndex = GetPawnLocalSpecIndex(class, specID)
-        if not localSpecIndex then
+        -- PawnFindScaleForSpec wants the local 1-4 spec index, which is
+        -- exactly what DataStore stores - see
+        -- WarbandMeDowns.Characters.GetKnownSpecIndex. An earlier version
+        -- converted that index to a global spec ID and back again through
+        -- Data.SpecsByClass, which could never match (global IDs start at 62),
+        -- so this function returned nil for every character and Pawn was never
+        -- consulted at all.
+        local localSpecIndex = Characters.GetKnownSpecIndex(character)
+        if not classID or not localSpecIndex then
             return nil
         end
 
@@ -146,35 +127,4 @@ function Pawn.GetPawnItemValue(itemLink, scaleName)
 
     scaleCache[itemLink] = value or false
     return value
-end
-
----Compares two items purely on Pawn's score against a resolved scale. A
----missing item (nil/false, an empty slot) always loses to a present,
----scoreable item, and ties against another missing item. Returns nil (no
----opinion) only when at least one *present* item couldn't be scored by
----Pawn, so the caller can fall back to a different comparison for that
----pair - see WarbandMeDowns.Assignment.CompareItemsForCharacter, the only
----caller.
----@param itemLinkA ItemInfo
----@param itemLinkB ItemInfo
----@param scaleName string
----@return integer? # 1 if A is preferred, -1 if B is preferred, 0 if tied, nil if unknown
-function Pawn.CompareItemValuesForScale(itemLinkA, itemLinkB, scaleName)
-    if not itemLinkA and not itemLinkB then
-        return 0
-    end
-
-    local valueA = itemLinkA and Pawn.GetPawnItemValue(itemLinkA, scaleName)
-    local valueB = itemLinkB and Pawn.GetPawnItemValue(itemLinkB, scaleName)
-    if (itemLinkA and not valueA) or (itemLinkB and not valueB) then
-        return nil
-    end
-
-    valueA = valueA or -math.huge
-    valueB = valueB or -math.huge
-    if valueA == valueB then
-        return 0
-    end
-
-    return valueA > valueB and 1 or -1
 end

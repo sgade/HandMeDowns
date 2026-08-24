@@ -15,48 +15,87 @@ local Data = WarbandMeDowns.Data
 -- *** Specialization resolution
 
 local WarnedMissingSpecAPI = false
-local KnownSpecIDCache = {}
+local KnownSpecIndexCache = {}
 local SpecUnknown = {}
 
----Resolves the active specialization of a character, if known.
+---Resolves the active specialization of a character as Blizzard's *local
+---spec index* (1-4), if known.
+---
+---This is exactly what DataStore hands back and must not be confused with a
+---global spec ID: DataStore_Talents stores the value
+---C_SpecializationInfo.GetSpecialization() returns, packed into three bits
+---(`bit64:GetBits(info, 0, 3)` in DataStore_Talents/API/Specialization.lua),
+---so it can only ever be 1-4. Global spec IDs start at 62, so treating this
+---as one silently matches nothing at all - which is precisely what used to
+---make both the Pawn scale lookup and the per-spec weapon filtering below
+---dead code. Use WarbandMeDowns.Characters.GetKnownSpecID when a global ID is
+---what's wanted.
+---
 ---Requires the optional DataStore_Talents module and a character that has
 ---been scanned at least once; returns `nil` otherwise, which callers must
 ---treat as "spec unknown", never as "cannot use anything".
 ---@param character string
----@return number? specID
-function Characters.GetKnownSpecID(character)
-    local cached = KnownSpecIDCache[character]
+---@return number? localSpecIndex
+function Characters.GetKnownSpecIndex(character)
+    local cached = KnownSpecIndexCache[character]
     if cached == SpecUnknown then
         return nil
     elseif cached then
         return cached
     end
 
-    if not DataStore.GetActiveSpecInfo then
-        --@alpha@
-        if not WarnedMissingSpecAPI then
-            WarnedMissingSpecAPI = true
-            WarbandMeDowns:Print("warn: DataStore.GetActiveSpecInfo not available.")
+    local result = (function()
+        if not DataStore.GetActiveSpecInfo then
+            --@alpha@
+            if not WarnedMissingSpecAPI then
+                WarnedMissingSpecAPI = true
+                WarbandMeDowns:Print("warn: DataStore.GetActiveSpecInfo not available.")
+            end
+            --@end-alpha@
+            return nil
         end
-        --@end-alpha@
-        KnownSpecIDCache[character] = SpecUnknown
+
+        local success, _, specIndex = pcall(DataStore.GetActiveSpecInfo, DataStore, character)
+        if not success or not specIndex or specIndex == 0 then
+            return nil
+        end
+
+        -- Guard against a future DataStore change (or a class whose spec list
+        -- we do not know) handing back something that is not a valid index
+        -- into Data.SpecsByClass - better "spec unknown" than a wrong spec.
+        local _, class = DataStore:GetCharacterClass(character)
+        local specIDs = class and Data.SpecsByClass[class]
+        if not specIDs or specIndex > #specIDs then
+            return nil
+        end
+
+        return specIndex
+    end)()
+
+    KnownSpecIndexCache[character] = result or SpecUnknown
+    return result
+end
+
+---The character's active specialization as a global, Blizzard-stable spec ID
+---(the 62-1480 range in Data.Spec), translated from the local index DataStore
+---actually stores via Data.SpecsByClass' index ordering.
+---@param character string
+---@return number? specID
+function Characters.GetKnownSpecID(character)
+    local specIndex = Characters.GetKnownSpecIndex(character)
+    if not specIndex then
         return nil
     end
 
-    local success, _, specID = pcall(DataStore.GetActiveSpecInfo, DataStore, character)
-    if not success or not specID or specID == 0 then
-        KnownSpecIDCache[character] = SpecUnknown
-        return nil
-    end
-
-    KnownSpecIDCache[character] = specID
-    return specID
+    local _, class = DataStore:GetCharacterClass(character)
+    local specIDs = class and Data.SpecsByClass[class]
+    return specIDs and specIDs[specIndex]
 end
 
 ---Clears the per-character active-spec memo. Called by
 ---WarbandMeDowns.Assignment:Recompute() so a spec change is always picked up.
 function Characters.ClearSpecCache()
-    WarbandMeDowns.Util.clearTable(KnownSpecIDCache)
+    WarbandMeDowns.Util.clearTable(KnownSpecIndexCache)
 end
 
 ---Checks whether a weapon or shield is one the character's specialization
@@ -79,12 +118,19 @@ function Characters.IsItemSubclassFavoredBySpec(character, class, itemClassID, i
         return true
     end
 
+    -- Note this branch only started being reachable once GetKnownSpecID began
+    -- returning a real global spec ID; it used to receive a 1-4 index, which
+    -- never matched Data.SpecClass, so every character silently fell through
+    -- to the class-wide union below.
     local specID = Characters.GetKnownSpecID(character)
     if specID and Data.SpecClass[specID] == class then
         if isShield then
             return Data.SpecUsesShield[specID] == true
         end
-        return Data.SpecWeaponSubclasses[specID][itemSubclassID] == true
+        local favoredBySpec = Data.SpecWeaponSubclasses[specID]
+        if favoredBySpec then
+            return favoredBySpec[itemSubclassID] == true
+        end
     end
 
     if isShield then
@@ -180,13 +226,21 @@ end
 
 -- *** Reading what a character already has
 
+---Every inventory slot an item worn at `equipLocation` could occupy, and
+---what the character currently has in each one.
+---
+---The count is returned separately and the array is indexed 1..count with a
+---nil for every *empty* slot, because an empty slot is load-bearing: a
+---character wearing only one ring can take a new one for free, and `ipairs`
+---or `#` would simply hide that hole. Callers must iterate `1, count`.
 ---@param character string
 ---@param equipLocation string
----@return ItemInfo[]
+---@return ItemInfo[] equippedBySlot # 1..slotCount, nil entries mean an empty slot
+---@return number slotCount
 function Characters.GetEquippedItemsForEquipLocation(character, equipLocation)
     local slotId = Data.EquipLocToSlotID[equipLocation]
     if not slotId then
-        return {}
+        return {}, 0
     end
 
     local getItem = function(slotId)
@@ -194,22 +248,13 @@ function Characters.GetEquippedItemsForEquipLocation(character, equipLocation)
     end
 
     if equipLocation == "INVTYPE_FINGER" then
-        return {
-            getItem(INVSLOT_FINGER1),
-            getItem(INVSLOT_FINGER2)
-        }
+        return { getItem(INVSLOT_FINGER1), getItem(INVSLOT_FINGER2) }, 2
     elseif equipLocation == "INVTYPE_TRINKET" then
-        return {
-            getItem(INVSLOT_TRINKET1),
-            getItem(INVSLOT_TRINKET2)
-        }
+        return { getItem(INVSLOT_TRINKET1), getItem(INVSLOT_TRINKET2) }, 2
     elseif equipLocation == "INVTYPE_WEAPON" then
-        return {
-            getItem(INVSLOT_MAINHAND),
-            getItem(INVSLOT_OFFHAND)
-        }
+        return { getItem(INVSLOT_MAINHAND), getItem(INVSLOT_OFFHAND) }, 2
     else
-        return { getItem(slotId) }
+        return { getItem(slotId) }, 1
     end
 end
 

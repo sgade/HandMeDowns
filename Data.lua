@@ -148,6 +148,15 @@ local Spec = {
 }
 Data.Spec = Spec
 
+-- IMPORTANT: these lists are in Blizzard's *specialization index* order (the
+-- 1-4 index GetSpecializationInfoForClassID / C_SpecializationInfo.GetSpecialization
+-- use), NOT in spec-ID order. The two usually coincide, but not always: Monk's
+-- index order is Brewmaster, Mistweaver, Windwalker even though the spec IDs
+-- run Brewmaster(268), Windwalker(269), Mistweaver(270). Both
+-- WarbandMeDowns.Characters.GetKnownSpecID (index -> global spec ID) and
+-- WarbandMeDowns.Pawn.GetPawnScaleNameForCharacter (index -> Pawn scale)
+-- depend on this order being right, so verify it against the client rather
+-- than assuming it follows the IDs.
 SetClassSpecs("WARRIOR",     {Spec.Arms, Spec.Fury, Spec.ProtectionWarrior})
 SetClassSpecs("PALADIN",     {Spec.HolyPaladin, Spec.ProtectionPaladin, Spec.Retribution})
 SetClassSpecs("HUNTER",      {Spec.BeastMastery, Spec.Marksmanship, Spec.Survival})
@@ -157,7 +166,7 @@ SetClassSpecs("DEATHKNIGHT", {Spec.Blood, Spec.FrostDeathKnight, Spec.Unholy})
 SetClassSpecs("SHAMAN",      {Spec.Elemental, Spec.Enhancement, Spec.RestorationShaman})
 SetClassSpecs("MAGE",        {Spec.Arcane, Spec.Fire, Spec.FrostMage})
 SetClassSpecs("WARLOCK",     {Spec.Affliction, Spec.Demonology, Spec.Destruction})
-SetClassSpecs("MONK",        {Spec.Brewmaster, Spec.Windwalker, Spec.Mistweaver})
+SetClassSpecs("MONK",        {Spec.Brewmaster, Spec.Mistweaver, Spec.Windwalker})  -- index order != ID order, see above
 SetClassSpecs("DRUID",       {Spec.Balance, Spec.Feral, Spec.Guardian, Spec.RestorationDruid})
 SetClassSpecs("DEMONHUNTER", {Spec.Havoc, Spec.Vengeance, Spec.Devourer})
 SetClassSpecs("EVOKER",      {Spec.Devastation, Spec.Preservation, Spec.Augmentation})
@@ -303,6 +312,19 @@ function Data.GetItemClassAndSubclass(link)
     return classID, subclassID
 end
 
+---The item's equip location read from GetItemInfoInstant, which is served
+---straight off the link and works even for an item the client has not cached
+---- unlike Data.GetItemEquipLocation, which goes through C_Item.GetItemInfo
+---and returns nil until the item loads. Only used to work out *which slot* an
+---unreadable item would compete for, so it can be excluded from just that
+---slot's decisions instead of poisoning everything the character owns.
+---@param link ItemInfo
+---@return string?
+function Data.GetInstantEquipLocation(link)
+    local _, _, _, equipLoc = C_Item.GetItemInfoInstant(link)
+    return equipLoc
+end
+
 ---@param itemLink ItemInfo
 ---@param compareItemLink ItemInfo
 ---@return boolean
@@ -321,11 +343,36 @@ function Data.AreComparableItemTypes(itemLink, compareItemLink)
     return true
 end
 
+---The item's real, bonus-ID-adjusted item level, or nil when the client has
+---not cached this item yet.
+---
+---Callers must NOT coerce a nil result to 0: "unknown" and "item level 0" are
+---very different answers, and treating the first as the second makes an alt
+---whose gear simply is not cached yet look like they have an empty slot - see
+---WarbandMeDowns.Data.IsItemInfoResolved and the scorer in Assignment.lua.
 ---@param link ItemInfo
----@return number
+---@return number?
 function Data.GetActualItemLevel(link)
     local level, _, _ = C_Item.GetDetailedItemLevelInfo(link)
     return level
+end
+
+---Whether the client has everything WarbandMeDowns needs about an item.
+---
+---C_Item.GetItemInfo returns nil for any item not in the client's cache, and
+---bind type, quality and equip location all come out of that one call - so
+---right after a login an alt's stored gear is routinely unreadable. Asking
+---for it is also what queues the async load, so calling this doubles as the
+---request: GET_ITEM_INFO_RECEIVED then marks the engine dirty (see
+---Tooltip.lua's invalidation events) and the next recompute sees real data.
+---@param link ItemInfo?
+---@return boolean
+function Data.IsItemInfoResolved(link)
+    if not link then
+        return false
+    end
+
+    return C_Item.GetItemInfo(link) ~= nil and C_Item.GetDetailedItemLevelInfo(link) ~= nil
 end
 
 ---@param link ItemInfo

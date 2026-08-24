@@ -30,4 +30,5 @@ Characters.lua
 Settings.lua
 Pawn.lua
 Assignment.lua
+Diagnostics.lua
 Tooltip.lua

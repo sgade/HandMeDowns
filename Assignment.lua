@@ -17,8 +17,8 @@
        that character/slot. Never reassigned to anyone else.
     2. Bag/bank/mail, NOT sendable to a twink (soulbound, actually already
        Soulbound despite a sendable-looking bind type, or below Uncommon
-       quality) - also a floor (matches the old GetBestCompareItem, which
-       ignored bind type), but can never be claimed by another character.
+       quality) - also a floor, but can never be claimed by another
+       character.
     3. Bag/bank/mail, sendable to a twink - the only items ever reassigned;
        up for grabs by any eligible character in the warband, including
        their current owner.
@@ -33,6 +33,31 @@
   share a slot-class (e.g. browsing a vendor's rings) only ever pays for
   that settlement once.
 
+  *** The answer must not depend on who is logged in ***
+
+  The engine reads stored, account-wide DataStore snapshots, so the same
+  item must produce the same recommendation from every character. Three
+  things used to break that invariant, and the design below exists to keep
+  them fixed:
+
+    - Unreadable items are a distinct state, never a zero. C_Item.GetItemInfo
+      and C_Item.GetDetailedItemLevelInfo both return nil for an item the
+      client has not cached, which is routine for an alt's stored gear right
+      after login. Scoring that as "item level 0" made the alt look like they
+      had an empty slot and hand them the item - and since cache warmth
+      differs every session, the winner moved around. Anything unreadable now
+      yields Assignment.Pending and no tooltip line until the data arrives.
+
+    - Comparisons are transitive. A single *basis* (Pawn score, or item level)
+      is chosen once per character per settlement and used for every
+      comparison in it, instead of falling back per pair. Mixing two orderings
+      in one chain made the greedy winner depend on scan order.
+
+    - Iteration is deterministic. Characters are walked in priority order and
+      every candidate bucket is sorted on a stable key, so Lua's `pairs`
+      ordering over DataStore's container tables can never leak into the
+      result.
+
 ----------------------------------------------------------------------------]]--
 
 WarbandMeDowns.Assignment = WarbandMeDowns.Assignment or {}
@@ -44,61 +69,233 @@ local Pawn = WarbandMeDowns.Pawn
 -- Sentinels, mirroring the old CacheMiss idiom.
 Assignment.Sell = {}         -- confirmed upgrade for nobody: drives the tooltip's sell line
 Assignment.Ineligible = {}   -- this character can never use this slot-class at all
+Assignment.Pending = {}      -- the answer depends on item data the client has not cached yet
+
+-- Where a pool/floorExtra entry was found. Only used to order entries
+-- deterministically and to match a hovered item back to its exact instance.
+local SourceContainer = 1
+local SourceMail = 2
+
+-- Bucket for an unreadable item whose equip location we could not determine
+-- either; it has to count against every slot of its class.
+local AnyEquipLocation = "*"
 
 -- Per-generation state, wiped wholesale by Recompute()/Reset() - see below.
 Assignment.dirty = true
-Assignment.pool = {}             -- pool[slotClassKey][rawEquipLoc] = { entry, ... }          (sendable bag/bank/mail items)
-Assignment.floorExtra = {}       -- floorExtra[slotClassKey][rawEquipLoc] = { entry, ... }     (unsendable bag/bank/mail items)
-Assignment.entryByLink = {}      -- entryByLink[itemLink] = entry                              (first pool entry seen for a link)
-Assignment.settledBestCache = {} -- settledBestCache[slotClassKey][targetEquipLoc][character] = itemLink | false | Ineligible
+Assignment.pool = {}              -- pool[slotClassKey][rawEquipLoc] = { entry, ... }       (sendable bag/bank/mail items)
+Assignment.floorExtra = {}        -- floorExtra[slotClassKey][rawEquipLoc] = { entry, ... }  (unsendable bag/bank/mail items)
+Assignment.entriesByLink = {}     -- entriesByLink[itemLink] = { entry, ... }                (every pool entry sharing a link)
+Assignment.settledBestCache = {}  -- settledBestCache[slotClassKey][targetEquipLoc][character] = itemLink | false | Ineligible
+Assignment.unresolvedCache = {}   -- unresolvedCache[slotClassKey][targetEquipLoc][character] = true
+Assignment.unresolvedOwners = {}  -- unresolvedOwners[slotClassKey][equipLoc][character] = true (owns an unreadable item competing there)
 Assignment._sortedCharacters = {}
 Assignment._debounceToken = 0
 
----Compares two items of the same slot-class for a character: Pawn's score
----first, when Pawn is installed and a scale resolves for the character,
----falling back to plain item level only when Pawn has no opinion (not
----installed, unknown spec, or unable to score one of these two particular
----items). This is the single comparator used everywhere "which of these
----two items is better for this character" is decided. Either item may be
----nil/false (an empty slot).
+-- *** Scoring
+--
+-- A "scorer" fixes one comparison basis for one character for the duration of
+-- one decision. Pawn's score is authoritative whenever a scale resolves for
+-- the character AND Pawn can score every item involved; otherwise item level
+-- is used for all of them. Committing to a single basis up front is what makes
+-- the comparison a total order, which _ClaimBestCandidate's greedy scan relies
+-- on. Falling back per pair - Pawn for A vs B, item level for B vs C - is not
+-- transitive and made the winner depend on iteration order.
+
+---@class WarbandMeDownsScorer
+---@field basis string # "pawn" or "itemlevel"
+---@field scaleName string? # the resolved Pawn scale, when basis is "pawn"
+---@field resolved boolean # false when some item involved could not be read at all
+---@field scoreOf fun(itemLink: ItemInfo?): number?
+
 ---@param character string
----@param itemLinkA ItemInfo
----@param itemLinkB ItemInfo
----@return integer # 1 if A is preferred, -1 if B is preferred, 0 if tied
-function Assignment.CompareItemsForCharacter(character, itemLinkA, itemLinkB)
+---@param items ItemInfo[] # every item this decision depends on
+---@return WarbandMeDownsScorer
+function Assignment:_BuildScorerForCharacter(character, items)
     local scaleName = Pawn.GetPawnScaleNameForCharacter(character)
+
     if scaleName then
-        local pawnResult = Pawn.CompareItemValuesForScale(itemLinkA, itemLinkB, scaleName)
-        if pawnResult then
-            return pawnResult
+        local scores = {}
+        local scoredEverything = true
+
+        for _, itemLink in ipairs(items) do
+            if scores[itemLink] == nil then
+                local value = Pawn.GetPawnItemValue(itemLink, scaleName)
+                if not value then
+                    scoredEverything = false
+                    break
+                end
+                scores[itemLink] = value
+            end
+        end
+
+        if scoredEverything then
+            return {
+                basis = "pawn",
+                scaleName = scaleName,
+                -- Pawn can only score an item it was able to parse, so a
+                -- complete Pawn pass implies every item was readable.
+                resolved = true,
+                scoreOf = function(itemLink)
+                    if not itemLink then
+                        return nil
+                    end
+                    return scores[itemLink]
+                end,
+            }
         end
     end
 
-    local levelA = (itemLinkA and Data.GetActualItemLevel(itemLinkA)) or 0
-    local levelB = (itemLinkB and Data.GetActualItemLevel(itemLinkB)) or 0
-    if levelA ~= levelB then
-        return levelA > levelB and 1 or -1
+    local resolved = true
+    for _, itemLink in ipairs(items) do
+        if not Data.IsItemInfoResolved(itemLink) then
+            resolved = false
+        end
     end
 
-    return 0
+    return {
+        basis = "itemlevel",
+        scaleName = nil,
+        resolved = resolved,
+        scoreOf = function(itemLink)
+            if not itemLink then
+                return nil
+            end
+            return Data.GetActualItemLevel(itemLink)
+        end,
+    }
+end
+
+---Compares two items on a scorer's single basis. A missing item (nil/false,
+---an empty slot) always loses to a present, scoreable one and ties against
+---another missing item - but an item that is *present and unreadable* is not
+---a loss, it is an unanswered question, and returns nil so the caller can
+---decline to decide rather than silently treating it as worthless.
+---@param scorer WarbandMeDownsScorer
+---@param itemLinkA ItemInfo?
+---@param itemLinkB ItemInfo?
+---@return integer? # 1 if A is preferred, -1 if B is preferred, 0 if tied, nil if undecidable
+local function CompareWithScorer(scorer, itemLinkA, itemLinkB)
+    if not itemLinkA and not itemLinkB then
+        return 0
+    end
+
+    local scoreA = itemLinkA and scorer.scoreOf(itemLinkA)
+    local scoreB = itemLinkB and scorer.scoreOf(itemLinkB)
+    if (itemLinkA and not scoreA) or (itemLinkB and not scoreB) then
+        return nil
+    end
+
+    scoreA = scoreA or -math.huge
+    scoreB = scoreB or -math.huge
+    if scoreA == scoreB then
+        return 0
+    end
+
+    return scoreA > scoreB and 1 or -1
+end
+Assignment.CompareWithScorer = CompareWithScorer
+
+---Compares two items of the same slot-class for a character. Convenience
+---wrapper that builds a throwaway scorer for just this pair; the settlement
+---path builds one scorer per character instead, so every comparison inside a
+---settlement shares one basis.
+---@param character string
+---@param itemLinkA ItemInfo?
+---@param itemLinkB ItemInfo?
+---@return integer? # 1 if A is preferred, -1 if B is preferred, 0 if tied, nil if undecidable
+function Assignment.CompareItemsForCharacter(character, itemLinkA, itemLinkB)
+    local items = {}
+    if itemLinkA then
+        table.insert(items, itemLinkA)
+    end
+    if itemLinkB then
+        table.insert(items, itemLinkB)
+    end
+
+    local scorer = Assignment:_BuildScorerForCharacter(character, items)
+    return CompareWithScorer(scorer, itemLinkA, itemLinkB)
 end
 
 -- *** Phase A: single full pass over every character's bag/bank/mail items
 
 local WarnedMissingMailAPI = false
 
+---Total order over entries, so the candidate list never depends on Lua's
+---`pairs` ordering over DataStore's container tables (which is arbitrary and
+---differs between sessions).
+---@param left table
+---@param right table
+---@return boolean
+local function CompareEntries(left, right)
+    if left.character ~= right.character then
+        return left.character < right.character
+    end
+    if left.source ~= right.source then
+        return left.source < right.source
+    end
+    if left.containerId ~= right.containerId then
+        return left.containerId < right.containerId
+    end
+    if left.slotId ~= right.slotId then
+        return left.slotId < right.slotId
+    end
+    return tostring(left.link) < tostring(right.link)
+end
+
 ---Buckets one bag/bank/mail item into the pool (sendable) or floorExtra
 ---(unsendable) table for its slot-class, keyed by its own equip location.
 ---@param character string
 ---@param itemLink ItemInfo?
 ---@param itemLocation ItemLocation? # live location, only ever set for the current character's own bag/bank items
-function Assignment:_ClassifyItem(character, itemLink, itemLocation)
+---@param source integer # SourceContainer or SourceMail
+---@param containerId number
+---@param slotId number
+function Assignment:_ClassifyItem(character, itemLink, itemLocation, source, containerId, slotId)
     if not itemLink then
         return
     end
 
+    -- GetItemInfoInstant works straight off the link with no cache involved,
+    -- so this cheap filter runs before anything that can fail.
     local classID, subclassID = Data.GetItemClassAndSubclass(itemLink)
     if classID ~= Data.ItemClassArmor and classID ~= Data.ItemClassWeapon then
+        return
+    end
+
+    local slotClassKey = Data.SlotClassKey(classID, subclassID)
+
+    -- Everything below needs the client's item cache. Remember that this
+    -- character has something unreadable, so any recommendation that would
+    -- depend on them is withheld rather than being made on partial data.
+    --
+    -- Record it against the exact slot it would compete for, so an unreadable
+    -- helm cannot suppress an answer about rings. Both halves of that key come
+    -- from GetItemInfoInstant, which is served off the link and needs no
+    -- cache; note the slot-class alone is far too coarse, since
+    -- Data.SlotClassKey deliberately collapses every kind of armour into one
+    -- bucket and leaves the equip location to tell a helm from a ring. An
+    -- unknown location falls back to the AnyEquipLocation wildcard.
+    --
+    -- The IsItemInfoResolved call itself queues the async load, and
+    -- GET_ITEM_INFO_RECEIVED brings us back for another pass.
+    if not Data.IsItemInfoResolved(itemLink) then
+        local instantEquipLoc = Data.GetInstantEquipLocation(itemLink)
+        if not instantEquipLoc or instantEquipLoc == "" then
+            instantEquipLoc = AnyEquipLocation
+        end
+
+        local byLocation = self.unresolvedOwners[slotClassKey]
+        if not byLocation then
+            byLocation = {}
+            self.unresolvedOwners[slotClassKey] = byLocation
+        end
+
+        local owners = byLocation[instantEquipLoc]
+        if not owners then
+            owners = {}
+            byLocation[instantEquipLoc] = owners
+        end
+        owners[character] = true
         return
     end
 
@@ -113,40 +310,58 @@ function Assignment:_ClassifyItem(character, itemLink, itemLocation)
         and Data.IsQualityEligible(quality)
         and not Data.IsActuallySoulbound(bind, false, itemLocation)
 
-    local slotClassKey = Data.SlotClassKey(classID, subclassID)
-    local entry = { link = itemLink, character = character }
+    local entry = {
+        link = itemLink,
+        character = character,
+        source = source,
+        containerId = containerId,
+        slotId = slotId,
+    }
 
     local bucketTable = sendable and self.pool or self.floorExtra
     bucketTable[slotClassKey] = bucketTable[slotClassKey] or {}
     bucketTable[slotClassKey][equipLoc] = bucketTable[slotClassKey][equipLoc] or {}
     table.insert(bucketTable[slotClassKey][equipLoc], entry)
 
-    if sendable and not self.entryByLink[itemLink] then
-        self.entryByLink[itemLink] = entry
+    if sendable then
+        local entries = self.entriesByLink[itemLink]
+        if not entries then
+            entries = {}
+            self.entriesByLink[itemLink] = entries
+        end
+        table.insert(entries, entry)
     end
 end
 
 ---One pass over every character's bags, bank, and mail. Equipped items are
 ---deliberately not scanned here: they're read on demand from DataStore (a
----handful of O(1) slot lookups) inside _BestFloorItem, since they're never
----reassignable and don't need bulk bucketing.
+---handful of O(1) slot lookups) inside _ReplaceableFloorItem, since they're
+---never reassignable and don't need bulk bucketing.
+---
+---Requires self._sortedCharacters to already be populated - Recompute() sorts
+---before scanning so this walk is in a stable order.
 function Assignment:ScanWarband()
     self.pool = {}
     self.floorExtra = {}
-    self.entryByLink = {}
+    self.entriesByLink = {}
     self.settledBestCache = {}
+    self.unresolvedCache = {}
+    self.unresolvedOwners = {}
 
-    for _, character in ipairs(Characters.GetWarbandCharacters()) do
+    for _, character in ipairs(self._sortedCharacters) do
         local isCurrentCharacter = character == DataStore.ThisCharKey
 
         Characters.IterateStoredContainerItems(character, function(containerId, _, slotId, _, itemLink)
             local itemLocation = isCurrentCharacter and Data.GetLiveBagItemLocation(containerId, slotId) or nil
-            self:_ClassifyItem(character, itemLink, itemLocation)
+            self:_ClassifyItem(character, itemLink, itemLocation, SourceContainer, containerId, slotId)
         end)
 
         if DataStore.IterateMails then
+            local mailIndex = 0
             DataStore:IterateMails(character, function(_, _, mailItemLink)
-                self:_ClassifyItem(character, mailItemLink) -- no ItemLocation for mail
+                mailIndex = mailIndex + 1
+                -- no ItemLocation for mail, and no container to key on
+                self:_ClassifyItem(character, mailItemLink, nil, SourceMail, 0, mailIndex)
             end)
         elseif not WarnedMissingMailAPI then
             WarnedMissingMailAPI = true
@@ -155,50 +370,105 @@ function Assignment:ScanWarband()
             --@end-alpha@
         end
     end
+
+    self:_SortBuckets()
 end
 
--- *** Phase C: lazy, memoized cascading assignment per (slot-class, target equip location)
-
----@param character string
----@param targetEquipLoc string
----@param slotClassKey string # only items sharing this slot-class count as the floor
----@param floorExtra table[] # unsendable bag/bank/mail entries relevant to this target
----@return ItemInfo?
-function Assignment:_BestFloorItem(character, targetEquipLoc, slotClassKey, floorExtra)
-    local best = nil
-
-    -- GetEquippedItemsForEquipLocation resolves purely by inventory slot (e.g.
-    -- both hands for INVTYPE_WEAPON, both offhand-slot types for
-    -- INVTYPE_SHIELD/INVTYPE_HOLDABLE), so it can hand back an item of a
-    -- completely different slot-class than the one being settled (a Sword
-    -- sharing INVTYPE_WEAPON with an equipped Dagger, a Shield sharing
-    -- INVSLOT_OFFHAND with an equipped Holdable, ...). Only count it toward
-    -- the floor if it's actually the same slot-class - i.e. the equivalent of
-    -- Data.AreComparableItemTypes, matching how pool/floorExtra are already
-    -- bucketed.
-    for _, equippedLink in ipairs(Characters.GetEquippedItemsForEquipLocation(character, targetEquipLoc)) do
-        if equippedLink then
-            local equippedClassID, equippedSubclassID = Data.GetItemClassAndSubclass(equippedLink)
-            if Data.SlotClassKey(equippedClassID, equippedSubclassID) == slotClassKey then
-                if not best or Assignment.CompareItemsForCharacter(character, equippedLink, best) == 1 then
-                    best = equippedLink
-                end
+---Puts every bucket into CompareEntries order once, after the scan, so the
+---arbitrary `pairs` order DataStore's container tables are iterated in cannot
+---influence which candidate a character claims.
+function Assignment:_SortBuckets()
+    for _, bucketsBySlotClass in ipairs({ self.pool, self.floorExtra }) do
+        for _, buckets in pairs(bucketsBySlotClass) do
+            for _, entries in pairs(buckets) do
+                table.sort(entries, CompareEntries)
             end
         end
     end
 
-    for _, entry in ipairs(floorExtra) do
-        if entry.character == character and (not best or Assignment.CompareItemsForCharacter(character, entry.link, best) == 1) then
-            best = entry.link
+    for _, entries in pairs(self.entriesByLink) do
+        table.sort(entries, CompareEntries)
+    end
+end
+
+-- *** Phase C: lazy, memoized cascading assignment per (slot-class, target equip location)
+
+---@param itemLink ItemInfo
+---@param slotClassKey string
+---@return boolean
+local function IsSameSlotClass(itemLink, slotClassKey)
+    local classID, subclassID = Data.GetItemClassAndSubclass(itemLink)
+    return Data.SlotClassKey(classID, subclassID) == slotClassKey
+end
+
+---The item this character would actually give up to take something new -
+---the bar a candidate has to beat.
+---
+---For a location with more than one slot (two rings, two trinkets, both
+---hands) a new item displaces the *worst* of them, so the worst is the bar.
+---Using the best instead - as an earlier version did - meant a character with
+---one good ring rejected every ring, and the item cascaded down the warband to
+---someone who needed it less.
+---
+---A slot contributes "nothing to give up" when it is empty, or when it holds
+---an item of a different slot-class. GetEquippedItemsForEquipLocation resolves
+---purely by inventory slot (both hands for INVTYPE_WEAPON, both offhand-slot
+---types for INVTYPE_SHIELD/INVTYPE_HOLDABLE), so it can hand back an item that
+---is not comparable at all - a Sword sharing INVTYPE_WEAPON with an equipped
+---Dagger, a Shield sharing INVSLOT_OFFHAND with an equipped Holdable. Such an
+---item cannot serve as the bar, and the slot is going to be taken over anyway,
+---so either case drives the floor to nil.
+---
+---Unsendable bag/bank/mail items are not slots but alternatives: if the
+---character already owns a better ring they cannot send away, they would equip
+---that instead of receiving this one. So the final floor is the better of the
+---worst equipped slot and the best unsendable item they already hold.
+---@param character string
+---@param slotClassKey string
+---@param floorExtra table[] # unsendable bag/bank/mail entries relevant to this target
+---@param scorer WarbandMeDownsScorer
+---@param equipped ItemInfo[]
+---@param slotCount number
+---@return ItemInfo?
+function Assignment:_ReplaceableFloorItem(character, slotClassKey, floorExtra, scorer, equipped, slotCount)
+    local equippedFloor = nil
+
+    for index = 1, slotCount do
+        local equippedLink = equipped[index]
+        if not equippedLink or not IsSameSlotClass(equippedLink, slotClassKey) then
+            -- Nothing to give up in this slot; no other slot can be lower.
+            equippedFloor = nil
+            break
+        end
+
+        if not equippedFloor or CompareWithScorer(scorer, equippedLink, equippedFloor) == -1 then
+            equippedFloor = equippedLink
         end
     end
 
-    return best
+    local ownedFloor = nil
+    for _, entry in ipairs(floorExtra) do
+        if entry.character == character then
+            if not ownedFloor or CompareWithScorer(scorer, entry.link, ownedFloor) == 1 then
+                ownedFloor = entry.link
+            end
+        end
+    end
+
+    if not equippedFloor then
+        return ownedFloor
+    end
+    if not ownedFloor then
+        return equippedFloor
+    end
+
+    return CompareWithScorer(scorer, ownedFloor, equippedFloor) == 1 and ownedFloor or equippedFloor
 end
 
 ---Unions every pool/floorExtra bucket whose own equip location satisfies
 ---Data.EquipLocationsMatch(candidateLoc, targetEquipLoc) against targetEquipLoc -
----reusing that predicate exactly as-is, including its asymmetry.
+---reusing that predicate exactly as-is, including its asymmetry. The result is
+---re-sorted because the buckets are visited in `pairs` order.
 ---@param bucketsBySlotClass table
 ---@param slotClassKey string
 ---@param targetEquipLoc string
@@ -218,29 +488,89 @@ local function UnionMatchingBuckets(bucketsBySlotClass, slotClassKey, targetEqui
         end
     end
 
+    table.sort(result, CompareEntries)
+    return result
+end
+
+---Every item one character's decision in this group depends on, so the scorer
+---can commit to a basis that covers all of them at once.
+---@param character string
+---@param equipped ItemInfo[]
+---@param slotCount number
+---@param floorExtra table[]
+---@param candidates table[]
+---@return ItemInfo[]
+local function CollectRelevantItems(character, equipped, slotCount, floorExtra, candidates)
+    local items = {}
+
+    for index = 1, slotCount do
+        if equipped[index] then
+            table.insert(items, equipped[index])
+        end
+    end
+
+    for _, entry in ipairs(floorExtra) do
+        if entry.character == character then
+            table.insert(items, entry.link)
+        end
+    end
+
+    for _, entry in ipairs(candidates) do
+        if not entry.claimedBy then
+            table.insert(items, entry.link)
+        end
+    end
+
+    return items
+end
+
+---Everyone who owns an unreadable item that would compete for this exact
+---target slot, and so cannot be judged for it yet. Uses the same
+---Data.EquipLocationsMatch predicate the candidate buckets do, so an
+---unreadable ambidextrous one-hander counts against both weapon hands
+---exactly like a readable one would.
+---@param slotClassKey string
+---@param targetEquipLoc string
+---@return table<string, boolean>
+function Assignment:_UnreadableOwnersFor(slotClassKey, targetEquipLoc)
+    local result = {}
+
+    local byLocation = self.unresolvedOwners[slotClassKey]
+    if not byLocation then
+        return result
+    end
+
+    for equipLoc, owners in pairs(byLocation) do
+        if equipLoc == AnyEquipLocation or Data.EquipLocationsMatch(equipLoc, targetEquipLoc) then
+            for character in pairs(owners) do
+                result[character] = true
+            end
+        end
+    end
+
     return result
 end
 
 ---Scans the whole unclaimed candidate pool for the single best entry that
 ---beats the character's floor, claiming it if found. Unlike a plain
 ---item-level ordering, a lower-ilvl entry can still win once Pawn score is
----authoritative (see Assignment.CompareItemsForCharacter), so this can't
----stop early the way an item-level-sorted scan could - it has to consider
----every unclaimed candidate. Correct despite comparing entries pairwise
----against a moving `best` rather than against `floor` every time, since the
----comparator is transitive: once `best` already beats `floor`, anything
----that beats `best` also beats `floor`.
+---authoritative, so this can't stop early the way an item-level-sorted scan
+---could - it has to consider every unclaimed candidate. Correct despite
+---comparing entries pairwise against a moving `best` rather than against
+---`floor` every time, because a scorer is a single total order: once `best`
+---already beats `floor`, anything that beats `best` also beats `floor`.
 ---@param character string
 ---@param candidates table[]
 ---@param floor ItemInfo?
+---@param scorer WarbandMeDownsScorer
 ---@return table? claimedEntry
-function Assignment:_ClaimBestCandidate(character, candidates, floor)
+function Assignment:_ClaimBestCandidate(character, candidates, floor, scorer)
     local best = nil
 
     for _, entry in ipairs(candidates) do
         if not entry.claimedBy then
             local reference = best and best.link or floor
-            if Assignment.CompareItemsForCharacter(character, entry.link, reference) == 1 then
+            if CompareWithScorer(scorer, entry.link, reference) == 1 then
                 best = entry
             end
         end
@@ -262,20 +592,30 @@ end
 ---@param subclassID number
 function Assignment:SettleGroup(slotClassKey, targetEquipLoc, classID, subclassID)
     self.settledBestCache[slotClassKey] = self.settledBestCache[slotClassKey] or {}
+    self.unresolvedCache[slotClassKey] = self.unresolvedCache[slotClassKey] or {}
     if self.settledBestCache[slotClassKey][targetEquipLoc] then
         return
     end
 
     local candidates = UnionMatchingBuckets(self.pool, slotClassKey, targetEquipLoc)
     local floorExtra = UnionMatchingBuckets(self.floorExtra, slotClassKey, targetEquipLoc)
+    local unreadableOwners = self:_UnreadableOwnersFor(slotClassKey, targetEquipLoc)
 
     local settledBest = {}
+    local unresolved = {}
+
     for _, character in ipairs(self._sortedCharacters) do
         if not Characters.CanCharacterEquipItemClass(character, classID, subclassID) then
             settledBest[character] = self.Ineligible
         else
-            local floor = self:_BestFloorItem(character, targetEquipLoc, slotClassKey, floorExtra)
-            local claimed = self:_ClaimBestCandidate(character, candidates, floor)
+            local equipped, slotCount = Characters.GetEquippedItemsForEquipLocation(character, targetEquipLoc)
+            local scorer = self:_BuildScorerForCharacter(
+                character,
+                CollectRelevantItems(character, equipped, slotCount, floorExtra, candidates)
+            )
+
+            local floor = self:_ReplaceableFloorItem(character, slotClassKey, floorExtra, scorer, equipped, slotCount)
+            local claimed = self:_ClaimBestCandidate(character, candidates, floor, scorer)
             if claimed then
                 claimed.claimedBy = character
                 claimed.claimedOverFloor = floor
@@ -283,10 +623,15 @@ function Assignment:SettleGroup(slotClassKey, targetEquipLoc, classID, subclassI
             else
                 settledBest[character] = floor or false
             end
+
+            if not scorer.resolved or unreadableOwners[character] then
+                unresolved[character] = true
+            end
         end
     end
 
     self.settledBestCache[slotClassKey][targetEquipLoc] = settledBest
+    self.unresolvedCache[slotClassKey][targetEquipLoc] = unresolved
 end
 
 -- *** Phase D: exposing results
@@ -306,11 +651,77 @@ function Assignment:BuildUpgradeInfo(character, itemLink, compareItem)
     return { character, compareItemLevel, itemLevel, statOnlyUpgrade }
 end
 
+---@param itemLocation ItemLocation?
+---@return number?, number?
+local function GetBagAndSlot(itemLocation)
+    if not itemLocation or not itemLocation.IsBagAndSlot or not itemLocation:IsBagAndSlot() then
+        return nil, nil
+    end
+    return itemLocation:GetBagAndSlot()
+end
+
+---Finds the pool entry for the exact item instance the tooltip is showing.
+---
+---Two physically distinct items can share one item link (a second copy of the
+---same ring), and they are claimed independently, so answering with whichever
+---entry happened to be recorded first can name the character who received the
+---*other* copy. Pin the real instance down by bag and slot when the tooltip
+---gives us a live location, then prefer the current character's own copy,
+---and only then fall back to the first entry in the (now deterministic) order.
+---@param itemLink ItemInfo
+---@param itemLocation ItemLocation?
+---@return table?
+function Assignment:_FindEntryForHoveredItem(itemLink, itemLocation)
+    local entries = self.entriesByLink[itemLink]
+    if not entries then
+        return nil
+    end
+
+    local bagID, slotID = GetBagAndSlot(itemLocation)
+    if bagID then
+        for _, entry in ipairs(entries) do
+            if entry.source == SourceContainer and entry.containerId == bagID and entry.slotId == slotID then
+                return entry
+            end
+        end
+    end
+
+    for _, entry in ipairs(entries) do
+        if entry.character == DataStore.ThisCharKey then
+            return entry
+        end
+    end
+
+    return entries[1]
+end
+
+---Whether any character the answer depends on is still missing item data.
+---Walking only as far as the character who would win keeps this precise: a
+---cold item on some low-priority alt cannot suppress an answer that was
+---already decided above them, and one permanently unreadable link cannot
+---silence the addon for good.
+---@param unresolved table<string, boolean>
+---@param stopCharacter string? # inclusive; nil checks the whole warband
+---@return boolean
+function Assignment:_AnyUnresolvedUpTo(unresolved, stopCharacter)
+    for _, character in ipairs(self._sortedCharacters) do
+        if unresolved[character] then
+            return true
+        end
+        if stopCharacter and character == stopCharacter then
+            return false
+        end
+    end
+
+    return false
+end
+
 ---Finds the destination for a given item: the character who should keep or
 ---receive it, WarbandMeDowns.Assignment.Sell if it's confirmed to be an
----upgrade for nobody, or nil if it was never eligible to be sent to a twink
----at all (wrong bind type, already Soulbound, below Uncommon quality, not
----armor/weapon, or not equippable).
+---upgrade for nobody, WarbandMeDowns.Assignment.Pending if the answer depends
+---on item data the client hasn't cached yet, or nil if it was never eligible
+---to be sent to a twink at all (wrong bind type, already Soulbound, below
+---Uncommon quality, not armor/weapon, or not equippable).
 ---
 ---Already-owned items resolve in O(1) once their slot-class/target group is
 ---settled. Items nobody in the warband owns yet (loot window, vendor,
@@ -320,6 +731,15 @@ end
 ---@param itemLocation ItemLocation? # live location of the hovered item, when available (see Data.IsActuallySoulbound)
 ---@return string|table|nil
 function Assignment:GetBestCharacterForItem(itemLink, itemLocation)
+    -- Nothing below can be trusted until the client has cached this item:
+    -- bind type, quality and equip location all come out of C_Item.GetItemInfo
+    -- and are nil for an uncached link, which would look exactly like "not
+    -- eligible". Asking queues the load and GET_ITEM_INFO_RECEIVED brings us
+    -- back, so this resolves itself a moment later.
+    if not Data.IsItemInfoResolved(itemLink) then
+        return self.Pending
+    end
+
     local bind = Data.GetItemBind(itemLink)
     if not bind or not Data.CanItemBeSentToTwink(bind) then
         return nil
@@ -348,12 +768,21 @@ function Assignment:GetBestCharacterForItem(itemLink, itemLocation)
 
     local slotClassKey = Data.SlotClassKey(classID, subclassID)
     self:SettleGroup(slotClassKey, targetEquipLoc, classID, subclassID)
+    local unresolved = self.unresolvedCache[slotClassKey][targetEquipLoc]
 
     -- Owned path: this exact item was seen during the warband scan.
-    local entry = self.entryByLink[itemLink]
+    local entry = self:_FindEntryForHoveredItem(itemLink, itemLocation)
     if entry then
         if entry.claimedBy then
+            if self:_AnyUnresolvedUpTo(unresolved, entry.claimedBy) then
+                return self.Pending
+            end
             return self:BuildUpgradeInfo(entry.claimedBy, itemLink, entry.claimedOverFloor)
+        end
+
+        -- "Nobody wants it" is only safe to say once everybody could be asked.
+        if self:_AnyUnresolvedUpTo(unresolved, nil) then
+            return self.Pending
         end
         return self.Sell
     end
@@ -362,13 +791,117 @@ function Assignment:GetBestCharacterForItem(itemLink, itemLocation)
     -- character's already-settled best instead of rescanning the warband.
     local settledBest = self.settledBestCache[slotClassKey][targetEquipLoc]
     for _, character in ipairs(self._sortedCharacters) do
+        if unresolved[character] then
+            return self.Pending
+        end
+
         local best = settledBest[character]
-        if best ~= self.Ineligible and Assignment.CompareItemsForCharacter(character, itemLink, best) == 1 then
-            return self:BuildUpgradeInfo(character, itemLink, best)
+        if best ~= self.Ineligible then
+            local scorer = self:_BuildScorerForCharacter(character, { itemLink, best or nil })
+            local comparison = CompareWithScorer(scorer, itemLink, best)
+            if comparison == nil then
+                return self.Pending
+            elseif comparison == 1 then
+                return self:BuildUpgradeInfo(character, itemLink, best)
+            end
         end
     end
 
     return self.Sell
+end
+
+-- *** Explaining a result
+--
+-- Read-only re-derivation of one decision, for the /wmd why command. It
+-- re-runs the same scorer and floor logic against the already-settled
+-- generation instead of mutating any claims, so what it prints is what the
+-- engine actually decided rather than a second, independent opinion.
+
+---@param itemLink ItemInfo
+---@return table
+function Assignment:ExplainItem(itemLink)
+    local explanation = {
+        link = itemLink,
+        resolved = Data.IsItemInfoResolved(itemLink),
+        rows = {},
+    }
+
+    if not explanation.resolved then
+        explanation.rejection = "the client has not cached this item yet"
+        return explanation
+    end
+
+    explanation.bind = Data.GetItemBind(itemLink)
+    explanation.quality = Data.GetItemQuality(itemLink)
+    explanation.equipLoc = Data.GetItemEquipLocation(itemLink)
+    explanation.itemLevel = Data.GetActualItemLevel(itemLink)
+
+    local classID, subclassID = Data.GetItemClassAndSubclass(itemLink)
+    explanation.classID = classID
+    explanation.subclassID = subclassID
+
+    if not explanation.bind or not Data.CanItemBeSentToTwink(explanation.bind) then
+        explanation.rejection = "bind type cannot be sent to a twink"
+        return explanation
+    end
+    if not Data.IsQualityEligible(explanation.quality) then
+        explanation.rejection = "below Uncommon quality"
+        return explanation
+    end
+    if classID ~= Data.ItemClassArmor and classID ~= Data.ItemClassWeapon then
+        explanation.rejection = "not armor or a weapon"
+        return explanation
+    end
+    if not explanation.equipLoc or explanation.equipLoc == "" then
+        explanation.rejection = "not equippable"
+        return explanation
+    end
+
+    self:EnsureFresh()
+
+    local slotClassKey = Data.SlotClassKey(classID, subclassID)
+    explanation.slotClassKey = slotClassKey
+    self:SettleGroup(slotClassKey, explanation.equipLoc, classID, subclassID)
+
+    local settledBest = self.settledBestCache[slotClassKey][explanation.equipLoc]
+    local unresolved = self.unresolvedCache[slotClassKey][explanation.equipLoc]
+    local candidates = UnionMatchingBuckets(self.pool, slotClassKey, explanation.equipLoc)
+    local floorExtra = UnionMatchingBuckets(self.floorExtra, slotClassKey, explanation.equipLoc)
+
+    for rank, character in ipairs(self._sortedCharacters) do
+        local row = {
+            rank = rank,
+            character = character,
+            displayName = Characters.GetDisplayName(character),
+            isCurrent = character == DataStore.ThisCharKey,
+            unresolved = unresolved[character] == true,
+            settled = settledBest[character],
+        }
+
+        if settledBest[character] == self.Ineligible then
+            row.eligible = false
+        else
+            row.eligible = true
+
+            local equipped, slotCount = Characters.GetEquippedItemsForEquipLocation(character, explanation.equipLoc)
+            local relevant = CollectRelevantItems(character, equipped, slotCount, floorExtra, candidates)
+            table.insert(relevant, itemLink)
+
+            local scorer = self:_BuildScorerForCharacter(character, relevant)
+            row.basis = scorer.basis
+            row.scaleName = scorer.scaleName
+
+            row.floor = self:_ReplaceableFloorItem(character, slotClassKey, floorExtra, scorer, equipped, slotCount)
+            row.floorScore = row.floor and scorer.scoreOf(row.floor)
+            row.itemScore = scorer.scoreOf(itemLink)
+            row.beatsFloor = CompareWithScorer(scorer, itemLink, row.floor)
+            row.isWinner = settledBest[character] == itemLink
+        end
+
+        table.insert(explanation.rows, row)
+    end
+
+    return explanation
 end
 
 -- *** Dirty-flag orchestration
@@ -392,11 +925,14 @@ function Assignment:Recompute()
     local debugRecomputeStartTime = debugprofilestop()
     --@end-debug@
 
-    self:ScanWarband()
-    self._sortedCharacters = Characters.GetSortedWarbandCharacters()
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
     Pawn.ClearCaches()
+
+    -- Sort before scanning: ScanWarband walks _sortedCharacters so that the
+    -- scan order is priority order rather than DataStore's `pairs` ordering.
+    self._sortedCharacters = Characters.GetSortedWarbandCharacters()
+    self:ScanWarband()
     self.dirty = false
 
     --@debug@
@@ -444,8 +980,10 @@ end
 function Assignment:Reset()
     self.pool = {}
     self.floorExtra = {}
-    self.entryByLink = {}
+    self.entriesByLink = {}
     self.settledBestCache = {}
+    self.unresolvedCache = {}
+    self.unresolvedOwners = {}
     self._sortedCharacters = {}
     self.dirty = true
 

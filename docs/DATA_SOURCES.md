@@ -39,7 +39,7 @@ flagged inline in the source comments above `SetSpecWeaponSubclasses` calls
 those still hold true each time this is refreshed; they can go stale
 independently of the DB2 data.
 
-## Item comparison (delegated to Pawn, `CompareItemValuesForScale`)
+## Item comparison (delegated to Pawn, via `Assignment:_BuildScorerForCharacter`)
 
 WarbandMeDowns used to hardcode a per-spec table of secondary stat priorities,
 hand-transcribed from Wowhead's guides. That table is gone. Item comparison
@@ -74,15 +74,15 @@ below) at `github.com/VgerMods/Pawn`, `master` branch, **Pawn version
   `.Stats`, `.Level`, `.SocketBonusStats`. Link-based, so it works for any
   item link regardless of which character owns it, same as the WoW APIs
   WarbandMeDowns already calls directly (`C_Item.GetItemInfo` etc.).
-- `PawnFindScaleForSpec(classID, specID)` - returns the name of a
+- `PawnFindScaleForSpec(classID, specIndex)` - returns the name of a
   plugin-provided scale for a class+spec, or `nil`. **`classID` is
-  Blizzard's numeric class ID (1-13)**; **`specID` here is the local 1-4
-  spec index** (`GetSpecializationInfoForClassID`'s convention - confirmed
-  against `ScaleTemplates.lua`'s own template entries, e.g. Druid Feral is
-  listed as `ClassID 11, SpecID 2`), **not** the global spec ID DataStore
-  and the rest of WarbandMeDowns use. `GetPawnLocalSpecIndex` in
-  `Pawn.lua` converts between the two using `Data.lua`'s existing
-  `SpecsByClass` ordering, which already matches this convention.
+  Blizzard's numeric class ID (1-13)**; **the second argument is the local
+  1-4 spec index** (`GetSpecializationInfoForClassID`'s convention -
+  confirmed against `ScaleTemplates.lua`'s own template entries, e.g. Druid
+  Feral is listed as `ClassID 11, SpecID 2`), **not** a global spec ID.
+  `Characters.GetKnownSpecIndex` returns exactly that local index, so
+  `Pawn.GetPawnScaleNameForCharacter` passes it straight through with no
+  conversion - see the warning below.
 - `PawnGetSingleValueFromItem(item, scaleName)` - returns a single numeric
   score for that item against that scale (gems, sockets, and normalization
   handled internally by Pawn).
@@ -93,6 +93,46 @@ module or user-imported string). That file registers a `"MrRobot"`-provider
 scale for every class+spec combination at login, so `PawnFindScaleForSpec`
 resolves for any alt's class/spec the moment Pawn is installed, with no
 per-user setup.
+
+### Spec identity: local index vs global spec ID
+
+Two different numbers are called a "spec" in this codebase, and confusing
+them silently disables things rather than erroring:
+
+- the **local spec index**, 1-4, Blizzard's position in
+  `GetSpecializationInfoForClassID` / `C_SpecializationInfo.GetSpecialization`.
+  This is what Pawn's `PawnFindScaleForSpec` wants.
+- the **global spec ID**, 62-1480, the values in `Data.Spec`. This is what
+  `Data.SpecClass`, `Data.SpecUsesShield` and `Data.SpecWeaponSubclasses` are
+  keyed by.
+
+**`DataStore:GetActiveSpecInfo(character)` returns the *local index* as its
+second value, not the global ID.** DataStore_Talents packs it into three bits
+(`bit64:GetBits(info, 0, 3)` in `API/Specialization.lua`, written from
+`C_SpecializationInfo.GetSpecialization()`), so it can only ever be 1-4.
+
+This bit an earlier version badly. It treated that value as a global spec ID,
+then tried to convert it *back* to a local index by searching `SpecsByClass`
+for it - a search that could never match, since global IDs start at 62. The
+result was that `PawnFindScaleForSpec` was never called for **any** character,
+so Pawn contributed nothing at all and every recommendation fell back to raw
+item level; and `IsItemSubclassFavoredBySpec`'s spec branch was equally
+unreachable, so weapon filtering silently used the class-wide union instead of
+the character's actual spec. Neither failure produced an error or a warning.
+
+`Characters.GetKnownSpecIndex` (local index, straight from DataStore) and
+`Characters.GetKnownSpecID` (global ID, mapped through `Data.SpecsByClass`)
+now keep the two apart. If Pawn ever appears to stop contributing, check this
+first: `/wmd ranks` prints the resolved Pawn scale per character, and a
+warband where every row says "no Pawn scale" while Pawn is installed is this
+bug returning.
+
+**`SpecsByClass` ordering matters and does not always follow the IDs.** The
+index-to-global-ID mapping is just `SpecsByClass[class][index]`, so those
+lists must be in Blizzard's *index* order. That usually coincides with spec-ID
+order, but not always - Monk's index order is Brewmaster, **Mistweaver**,
+Windwalker, while the IDs run Brewmaster(268), Windwalker(269),
+Mistweaver(270). Verify against the client rather than assuming.
 
 **This is not a documented or versioned API contract.** Every call in
 `Pawn.lua` (`GetPawnScaleNameForCharacter`,
@@ -120,3 +160,24 @@ and WarbandMeDowns' Pawn integration silently stops contributing scores
 way and re-check `PawnFindScaleForSpec`, `PawnGetItemData`, and
 `PawnGetSingleValueFromItem` still exist with the same parameter order and
 return shape.
+
+## What DataStore does and does not see
+
+The engine is only ever as good as DataStore's stored snapshots, and two gaps
+are worth knowing about before treating a recommendation as complete.
+
+**The warband (account) bank is invisible.** DataStore_Containers deliberately
+skips it: `OnBagUpdate` returns early for any `bag >= MIN_ACCOUNTBANK_TAB`
+(`Enum.BagIndex.AccountBankTab_1`), and `OnBankFrameOpened` only scans the
+character bank tabs. Nothing else writes those container IDs, so account bank
+tabs never reach `DataStore:GetContainers` and warbound gear parked there is
+simply not a candidate. Verified against DataStore_Containers 2026.08.x.
+
+**Other characters' data is a snapshot, and their mail is only as fresh as the
+last time that character opened a mailbox.** The settings page shows the
+per-module "last scanned" times for exactly this reason.
+
+Neither of these makes the answer *inconsistent* between characters - both are
+account-wide stored state, identical whoever is logged in - they just make it
+incomplete. Consistency is a separate concern, handled in `Assignment.lua`;
+see the header comment there for the three things that used to break it.
