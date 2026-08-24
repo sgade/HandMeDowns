@@ -19,6 +19,7 @@ function WarbandMeDowns:OnInitialize()
     end)
 
     WarbandMeDowns.Settings:Initialize()
+    WarbandMeDowns.Diagnostics:Initialize()
 end
 
 function WarbandMeDowns:OnEnable()
@@ -136,6 +137,15 @@ function WarbandMeDowns:OnTooltipSetItem(frame, ...)
     local itemLocation = GetHoveredItemLocation(frame)
     local result = WarbandMeDowns.Assignment:GetBestCharacterForItem(itemLink, itemLocation)
     if not result then
+        return
+    end
+
+    -- The answer depends on item data the client hasn't cached yet. Say
+    -- nothing rather than guess: asking for that data is what queues the load,
+    -- GET_ITEM_INFO_RECEIVED then marks the engine dirty, and the line shows
+    -- up on the next hover a moment later. A wrong character - or a premature
+    -- "sell it" - is far worse than a line that arrives late.
+    if result == WarbandMeDowns.Assignment.Pending then
         return
     end
 

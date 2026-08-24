@@ -229,9 +229,9 @@ local function BuildPanel()
     explanation:SetText(
         "WarbandMeDowns ranks your warband to decide who should get each piece of warbound gear. " ..
         "Characters are ordered by current level first, then by average equipped item level - both read " ..
-        "live from DataStore. This is the exact order used everywhere the addon makes a recommendation; " ..
-        "Pawn, if installed, only breaks ties between two items for the same character and never changes " ..
-        "this ranking."
+        "live from DataStore. This is the exact order used everywhere the addon makes a recommendation. " ..
+        "Pawn, if installed, decides which of two items is better for a given character's spec, but it " ..
+        "never changes this ranking. Use /wmd why <item link> to see how a particular item was assigned."
     )
 
     local divider = Panel:CreateTexture(nil, "ARTWORK")
