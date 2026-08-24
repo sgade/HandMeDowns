@@ -1,6 +1,6 @@
 # WarbandMeDowns
 
-[![GitHub Release](https://img.shields.io/github/v/release/sgade/WarbandMeDowns?sort=semver&display_name=release&style=for-the-badge&logo=github&color=rgb(20%2C4%2C120))](https://github.com/sgade/WarbandMeDowns/releases) [![CurseForge Game Versions](https://img.shields.io/curseforge/game-versions/1660805?style=for-the-badge&logo=battledotnet)](https://www.curseforge.com/wow/addons/mountsrarity) [![CurseForge Downloads](https://img.shields.io/curseforge/dt/1660805?style=for-the-badge&logo=curseforge&color=rgb(206%2C109%2C59))](https://www.curseforge.com/wow/addons/mountsrarity)
+[![GitHub Release](https://img.shields.io/github/v/release/sgade/WarbandMeDowns?sort=semver&display_name=release&style=for-the-badge&logo=github&color=rgb(20%2C4%2C120))](https://github.com/sgade/WarbandMeDowns/releases) [![CurseForge Game Versions](https://img.shields.io/curseforge/game-versions/1660805?style=for-the-badge&logo=battledotnet)](https://www.curseforge.com/wow/addons/warbandmedowns) [![CurseForge Downloads](https://img.shields.io/curseforge/dt/1660805?style=for-the-badge&logo=curseforge&color=rgb(206%2C109%2C59))](https://www.curseforge.com/wow/addons/warbandmedowns)
 
 Recommends alt characters for warbound and bind-on-equip gear.
 
