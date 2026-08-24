@@ -1,0 +1,57 @@
+name: Update TOC
+
+on:
+  schedule:
+    - cron: '17 0 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update_toc:
+    name: Update interface version
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Update TOC
+        uses: Oppzippy/update-toc-action@v1.2.0
+        with:
+          toc-path: WarbandMeDowns.toc
+          product: wow
+
+      - name: Read interface version
+        id: interface
+        run: |
+          interface="$(sed -n 's/^## Interface:[[:space:]]*\([0-9]\{5,6\}\).*/\1/p' WarbandMeDowns.toc | head -n 1)"
+
+          if [ -z "$interface" ]; then
+            echo "Could not read '## Interface:' from WarbandMeDowns.toc" >&2
+            exit 1
+          fi
+
+          # The action writes 00000 when its version lookup comes back empty,
+          # so reject anything below a 1.x.x interface version.
+          if [ "$((10#$interface))" -lt 10000 ]; then
+            echo "Implausible interface version '$interface' - the version lookup likely failed" >&2
+            exit 1
+          fi
+
+          patch="$(printf '%d.%d.%d' "$((10#$interface / 10000))" "$((10#$interface / 100 % 100))" "$((10#$interface % 100))")"
+
+          echo "interface=$interface" >> "$GITHUB_OUTPUT"
+          echo "patch=$patch" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v8.1.1
+        with:
+          branch: chore/update-toc
+          commit-message: 'chore(toc): update to patch ${{ steps.interface.outputs.patch }}'
+          title: 'chore(toc): update to patch ${{ steps.interface.outputs.patch }}'
+          body: |
+            Updates the TOC interface version to `${{ steps.interface.outputs.interface }}` (patch ${{ steps.interface.outputs.patch }}).
+
+            Created automatically by the [Update TOC](${{ github.server_url }}/${{ github.repository }}/actions/workflows/update-toc.yml) workflow.
