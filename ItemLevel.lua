@@ -119,7 +119,8 @@ local MainHandOnly = { INVSLOT_MAINHAND }
 
 ---@class WarbandMeDownsProjectedItemLevels
 ---@field maxItemLevel number? # equipping everything they already carry
----@field theoreticalItemLevel number? # ...plus what the engine would send them
+---@field theoreticalItemLevel number? # ...plus what the engine would send them; nil while pending
+---@field theoreticalPending boolean # the warband is not fully settled yet, so there is no answer
 ---@field unresolved boolean # some item involved could not be read yet
 
 -- *** Reading what a character is wearing
@@ -510,10 +511,14 @@ function ItemLevel.GetProjectedItemLevelsForWarband()
     local Assignment = WarbandMeDowns.Assignment
 
     Assignment:EnsureFresh()
-    -- entry.claimedBy is only filled in for groups that have been settled, and
-    -- settlement is lazy - so without this every "theoretical" number would
-    -- silently depend on which tooltips the player happened to hover.
-    Assignment:SettleAllGroups()
+
+    -- Deliberately does NOT settle. entry.claimedBy is only complete once every
+    -- group has been settled, and doing that here is what made opening the
+    -- settings panel stall for a second - see
+    -- Assignment:SettleAllGroupsIncrementally. Until it finishes, the
+    -- theoretical number has no honest value, so it is reported as pending
+    -- rather than computed from half the claims.
+    local pending = not Assignment:IsFullySettled()
 
     local incoming = {}
     Assignment:IterateOwnedEntries(function(entry)
@@ -529,7 +534,7 @@ function ItemLevel.GetProjectedItemLevelsForWarband()
     local projections = {}
     for character, cached in pairs(EnsureCharacterCache()) do
         if not cached.averageItemLevel then
-            projections[character] = { unresolved = false }
+            projections[character] = { unresolved = false, theoreticalPending = pending }
         else
             -- The equipped baseline and the owned gain are already cached; only
             -- the incoming items are new, and they are projected against the
@@ -547,7 +552,9 @@ function ItemLevel.GetProjectedItemLevelsForWarband()
 
             projections[character] = {
                 maxItemLevel = cached.maxItemLevel,
-                theoreticalItemLevel = cached.averageItemLevel + gain / AiLSlotCount,
+                theoreticalItemLevel = (not pending)
+                    and (cached.averageItemLevel + gain / AiLSlotCount) or nil,
+                theoreticalPending = pending,
                 unresolved = cached.unresolved or gainUnresolved
                     or Assignment:HasUnreadableItems(character),
             }

@@ -465,7 +465,8 @@ end
 ---@field level number?
 ---@field itemLevel number? # currently equipped average
 ---@field maxItemLevel number? # equipping everything they already carry
----@field theoreticalItemLevel number? # ...plus what the engine would send them
+---@field theoreticalItemLevel number? # ...plus what the engine would send them; nil while pending
+---@field theoreticalPending boolean # the warband is not fully settled yet
 ---@field unresolved boolean # some item involved could not be read yet
 
 ---The warband in priority order, with every number the settings table and
@@ -498,6 +499,7 @@ function Characters.GetWarbandRanking()
             itemLevel = DataStore:GetAverageItemLevel(character),
             maxItemLevel = projection and projection.maxItemLevel,
             theoreticalItemLevel = projection and projection.theoreticalItemLevel,
+            theoreticalPending = (projection and projection.theoreticalPending) or false,
             unresolved = (projection and projection.unresolved) or false,
         })
     end

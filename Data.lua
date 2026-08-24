@@ -316,17 +316,100 @@ Data.ClassID = {
     DRUID = 11, DEMONHUNTER = 12, EVOKER = 13,
 }
 
+-- *** Per-generation item metadata cache
+--
+-- Everything below is a property of the item *link*, which never changes, yet
+-- the engine asks for the same handful of facts about the same links over and
+-- over - one warband refresh used to make ~8000 C_Item calls against ~1400
+-- distinct links.
+--
+-- THE RULE: only resolved items are ever cached. When C_Item.GetItemInfo
+-- answers nil the result falls straight through, because asking is what queues
+-- the client's async load, and "unknown" is a transient state the whole engine
+-- depends on re-checking once GET_ITEM_INFO_RECEIVED arrives (see
+-- Data.GetActualItemLevel's contract below and the Assignment.lua header).
+-- Caching a nil would freeze an alt's gear as permanently unreadable.
+--
+-- Dropped per generation rather than kept for the session: an heirloom's item
+-- level scales with the level of the character doing the looking, and
+-- PLAYER_LEVEL_UP already drives a recompute.
+
+---@type table<string, table>
+local ItemInfoCache = {}
+
+---@type table<string, table>
+local InstantInfoCache = {}
+
+---Drops the item metadata memo. Called by WarbandMeDowns.Assignment's
+---Recompute() and Reset(), alongside the other per-generation memos.
+function Data.ClearItemCache()
+    wipe(ItemInfoCache)
+    wipe(InstantInfoCache)
+end
+
+---C_Item.GetItemInfoInstant's results for a link, memoized. Served off the link
+---with no cache involved, so unlike GetItemInfo it cannot fail transiently and
+---is always safe to remember.
+---@param link ItemInfo
+---@return table
+local function InstantInfo(link)
+    local cached = InstantInfoCache[link]
+    if cached then
+        return cached
+    end
+
+    local itemID, _, _, equipLoc, _, classID, subclassID = C_Item.GetItemInfoInstant(link)
+    cached = { itemID = itemID, equipLoc = equipLoc, classID = classID, subclassID = subclassID }
+    InstantInfoCache[link] = cached
+    return cached
+end
+
+---C_Item.GetItemInfo's results for a link, memoized - but only once the client
+---actually has them. Returns nil while the item is uncached, which is a real
+---answer callers must handle, not a failure.
+---@param link ItemInfo?
+---@return table?
+local function ItemInfo(link)
+    if not link then
+        return nil
+    end
+
+    local cached = ItemInfoCache[link]
+    if cached then
+        return cached
+    end
+
+    local name, _, quality, _, _, _, _, _, equipLoc, _, _, _, _, bindType = C_Item.GetItemInfo(link)
+    if not name then
+        -- Not cached client-side yet. Asking was the point - it queues the
+        -- load - but the nil must not be remembered.
+        return nil
+    end
+
+    local itemLevel = C_Item.GetDetailedItemLevelInfo(link)
+    local info = { quality = quality, equipLoc = equipLoc, bindType = bindType, itemLevel = itemLevel }
+
+    -- Remembered only when *complete*. GetItemInfo can answer while the
+    -- detailed item level has not arrived; that item is still served from this
+    -- table now, so bind type and quality work, but it is re-asked next time
+    -- instead of being frozen as unreadable.
+    if itemLevel then
+        ItemInfoCache[link] = info
+    end
+    return info
+end
+
 ---@param link ItemInfo
 ---@return Enum.ItemBind bindType
 function Data.GetItemBind(link)
-    local _, _, _, _, _, _, _, _, _, _, _, _, _, bindType = C_Item.GetItemInfo(link)
-    return bindType
+    local info = ItemInfo(link)
+    return info and info.bindType
 end
 
 ---@param link ItemInfo
 function Data.GetItemClassAndSubclass(link)
-    local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(link)
-    return classID, subclassID
+    local info = InstantInfo(link)
+    return info.classID, info.subclassID
 end
 
 ---The item's equip location read from GetItemInfoInstant, which is served
@@ -338,8 +421,7 @@ end
 ---@param link ItemInfo
 ---@return string?
 function Data.GetInstantEquipLocation(link)
-    local _, _, _, equipLoc = C_Item.GetItemInfoInstant(link)
-    return equipLoc
+    return InstantInfo(link).equipLoc
 end
 
 ---@param itemLink ItemInfo
@@ -370,8 +452,8 @@ end
 ---@param link ItemInfo
 ---@return number?
 function Data.GetActualItemLevel(link)
-    local level, _, _ = C_Item.GetDetailedItemLevelInfo(link)
-    return level
+    local info = ItemInfo(link)
+    return info and info.itemLevel
 end
 
 ---Whether the client has everything WarbandMeDowns needs about an item.
@@ -385,17 +467,14 @@ end
 ---@param link ItemInfo?
 ---@return boolean
 function Data.IsItemInfoResolved(link)
-    if not link then
-        return false
-    end
-
-    return C_Item.GetItemInfo(link) ~= nil and C_Item.GetDetailedItemLevelInfo(link) ~= nil
+    local info = ItemInfo(link)
+    return info ~= nil and info.itemLevel ~= nil
 end
 
 ---@param link ItemInfo
 function Data.GetItemEquipLocation(link)
-    local _, _, _, _, _, _, _, _, itemEquipLoc = C_Item.GetItemInfo(link)
-    return itemEquipLoc
+    local info = ItemInfo(link)
+    return info and info.equipLoc
 end
 
 local OneHandWeaponEquipLocations = {
@@ -478,8 +557,8 @@ local MinRecommendableQuality = (Enum and Enum.ItemQuality and Enum.ItemQuality.
 ---@param link ItemInfo
 ---@return number quality
 function Data.GetItemQuality(link)
-    local _, _, quality = C_Item.GetItemInfo(link)
-    return quality
+    local info = ItemInfo(link)
+    return info and info.quality
 end
 
 ---Grey/white items are never worth recommending, regardless of bind type.

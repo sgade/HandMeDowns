@@ -97,6 +97,9 @@ Assignment.unresolvedCache = {}   -- unresolvedCache[slotClassKey][targetEquipLo
 Assignment.unresolvedOwners = {}  -- unresolvedOwners[slotClassKey][equipLoc][character] = true (owns an unreadable item competing there)
 Assignment._sortedCharacters = {}
 Assignment._debounceTimer = nil
+Assignment.settledAll = false     -- every group in the pool has been settled this generation
+Assignment._settleTimer = nil
+Assignment._settleQueue = nil
 
 -- *** Scoring
 --
@@ -915,6 +918,82 @@ function Assignment:SettleAllGroups()
     for _, group in ipairs(self:_SettleableGroups()) do
         self:SettleGroup(group.slotClassKey, group.equipLoc, group.classID, group.subclassID)
     end
+    self.settledAll = true
+end
+
+---Whether every group has been settled this generation, i.e. whether
+---`entry.claimedBy` can be trusted to be complete.
+---@return boolean
+function Assignment:IsFullySettled()
+    return self.settledAll
+end
+
+---Settles every group the way SettleAllGroups does, but one group per timer
+---tick instead of all of them in the frame that asked.
+---
+---Settling the whole pool at once is expensive in a way the tooltip path never
+---is: with Pawn installed it asks Pawn to evaluate every warbound item in the
+---warband, and Pawn parses a hidden tooltip per item it has not seen. Several
+---hundred of those in one frame is a visible stall, which is what made opening
+---the settings panel hitch.
+---
+---One group per tick is the finest grain available - SettleGroup mutates claims
+---across the whole pool and has to complete atomically, so it cannot be split.
+---
+---Safe to call repeatedly: a run already in flight is left alone, and a
+---Recompute cancels it (see CancelIncrementalSettle) rather than letting it
+---continue against a wiped pool.
+---@param onComplete fun()? # called once the last group is settled
+function Assignment:SettleAllGroupsIncrementally(onComplete)
+    if self.settledAll then
+        if onComplete then
+            onComplete()
+        end
+        return
+    end
+
+    if self._settleTimer then
+        return -- already running
+    end
+
+    self._settleQueue = self:_SettleableGroups()
+    local index = 0
+    local generation = self._settleQueue
+
+    local function step()
+        self._settleTimer = nil
+
+        -- A Recompute since the last tick replaced the queue; this run is stale.
+        if self._settleQueue ~= generation then
+            return
+        end
+
+        index = index + 1
+        local group = generation[index]
+        if not group then
+            self.settledAll = true
+            self._settleQueue = nil
+            if onComplete then
+                onComplete()
+            end
+            return
+        end
+
+        self:SettleGroup(group.slotClassKey, group.equipLoc, group.classID, group.subclassID)
+        self._settleTimer = WarbandMeDowns:ScheduleTimer(step, 0.05)
+    end
+
+    self._settleTimer = WarbandMeDowns:ScheduleTimer(step, 0)
+end
+
+---Stops an in-flight incremental settle. The pool it was walking is about to be
+---thrown away, so its remaining groups are meaningless.
+function Assignment:CancelIncrementalSettle()
+    if self._settleTimer then
+        WarbandMeDowns:CancelTimer(self._settleTimer)
+        self._settleTimer = nil
+    end
+    self._settleQueue = nil
 end
 
 ---Every bag/bank/mail entry the last scan produced - sendable pool entries
@@ -1088,6 +1167,12 @@ function Assignment:Recompute(userRequested)
     -- normal retail API, present in every build despite the name.
     local startTime = debugprofilestop()
 
+    -- Whatever the incremental settle had left to do refers to a pool that is
+    -- about to be replaced.
+    self:CancelIncrementalSettle()
+    self.settledAll = false
+
+    Data.ClearItemCache()
     Characters.ClearWarbandCache()
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
@@ -1163,6 +1248,11 @@ function Assignment:TryBackgroundRecompute()
     end
 
     self:Recompute()
+
+    -- Warm the settlement too, spread over the next handful of frames. Nothing
+    -- needs it yet, but the settings panel and /wmd ranks do, and paying for it
+    -- here means those are instant and complete when they are opened.
+    self:SettleAllGroupsIncrementally()
 end
 
 ---Drops all engine state. Called on OnDisable so a re-enable starts clean.
@@ -1175,8 +1265,12 @@ function Assignment:Reset()
     self.unresolvedOwners = {}
     self._sortedCharacters = {}
     self._debounceTimer = nil
+    self.settledAll = false
     self.dirty = true
 
+    self:CancelIncrementalSettle()
+
+    Data.ClearItemCache()
     Characters.ClearWarbandCache()
     Characters.ClearEligibilityCache()
     Characters.ClearSpecCache()
