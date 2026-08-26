@@ -125,28 +125,6 @@ local MainHandOnly = { INVSLOT_MAINHAND }
 
 -- *** Reading what a character is wearing
 
----The item currently in one of a character's equipment slots.
----
----For the logged-in character this goes to the live API, which is both fresher
----than DataStore's snapshot (which lags an equipment change until its next
----scan) and immune to the bare-itemID hazard in the file header. Doing this
----only for the current character does not reintroduce a "depends on who is
----logged in" problem: these two numbers are display-only and never feed back
----into an assignment.
----@param character string
----@param slotId number
----@return ItemInfo?
-local function GetEquippedLink(character, slotId)
-    if character == DataStore.ThisCharKey and type(GetInventoryItemLink) == "function" then
-        local success, link = pcall(GetInventoryItemLink, "player", slotId)
-        if success and link then
-            return link
-        end
-    end
-
-    return DataStore:GetInventoryItem(character, slotId)
-end
-
 ---What the character has in every item-level-relevant slot right now.
 ---
 ---An empty slot is 0 - a real, known "nothing here". An item that is present
@@ -163,7 +141,7 @@ local function ReadEquippedItemLevels(character)
     local mainHandLink = nil
 
     for _, slotId in ipairs(AiLSlots) do
-        local link = GetEquippedLink(character, slotId)
+        local link = Characters.GetEquippedItemLink(character, slotId)
         if slotId == INVSLOT_MAINHAND then
             mainHandLink = link
         end
