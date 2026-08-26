@@ -226,6 +226,28 @@ end
 
 -- *** Reading what a character already has
 
+---The item link currently in one of a character's equipment slots.
+---
+---For the logged-in character this goes to the live API, which is both
+---fresher than DataStore's snapshot (which lags an equipment change until its
+---next scan) and immune to the bare-itemID hazard documented in
+---ItemLevel.lua. Doing this only for the current character does not
+---reintroduce a "depends on who is logged in" problem: every other character
+---still reads DataStore's own last scan, exactly as before.
+---@param character string
+---@param slotId number
+---@return ItemInfo?
+function Characters.GetEquippedItemLink(character, slotId)
+    if character == DataStore.ThisCharKey and type(GetInventoryItemLink) == "function" then
+        local success, link = pcall(GetInventoryItemLink, "player", slotId)
+        if success and link then
+            return link
+        end
+    end
+
+    return DataStore:GetInventoryItem(character, slotId)
+end
+
 ---Every inventory slot an item worn at `equipLocation` could occupy, and
 ---what the character currently has in each one.
 ---
@@ -244,7 +266,7 @@ function Characters.GetEquippedItemsForEquipLocation(character, equipLocation)
     end
 
     local getItem = function(slotId)
-        return DataStore:GetInventoryItem(character, slotId)
+        return Characters.GetEquippedItemLink(character, slotId)
     end
 
     if equipLocation == "INVTYPE_FINGER" then
