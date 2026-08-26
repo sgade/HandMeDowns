@@ -386,6 +386,20 @@ local function ItemInfo(link)
         return nil
     end
 
+    -- GetItemInfo answering is not the same question as the item being fully
+    -- loaded: for a level-scaling item (Timewalking, some leveling-zone
+    -- rewards) GetDetailedItemLevelInfo can return a real, non-nil number
+    -- off incomplete data - not this item's actual level, just whatever the
+    -- client has resolved so far. That number would sail past the `if
+    -- itemLevel` check below and be cached as final. IsItemDataCachedByID is
+    -- the real "is this done loading" signal; treat "not yet" exactly like
+    -- the uncached-name case above and let the normal GET_ITEM_INFO_RECEIVED
+    -- retry pick it up once it's actually ready.
+    local itemID = InstantInfo(link).itemID
+    if not itemID or not C_Item.IsItemDataCachedByID(itemID) then
+        return nil
+    end
+
     local itemLevel = C_Item.GetDetailedItemLevelInfo(link)
     local info = { quality = quality, equipLoc = equipLoc, bindType = bindType, itemLevel = itemLevel }
 
